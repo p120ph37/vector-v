@@ -3,6 +3,17 @@ module vrl
 // ObjectMap is an adaptive map that starts as flat parallel arrays for small
 // sizes and promotes to a hash map when the entry count exceeds the threshold.
 //
+// DIVERGENCE FROM UPSTREAM: Rust VRL uses BTreeMap<KeyString, Value> for
+// ObjectMap, which iterates in sorted (lexicographic) key order. Our
+// implementation does NOT maintain sorted order — flat mode preserves
+// approximate insertion order (swap-remove on delete can reorder), and hash
+// map mode has arbitrary iteration order. This is acceptable because:
+//   - JSON output (vrl_to_json) sorts keys explicitly before serializing
+//   - No VRL program can observe iteration order in a way that affects
+//     correctness of event processing
+// If sorted iteration is ever needed internally, sort at the call site
+// rather than adding overhead to every map operation.
+//
 // For sizes <= threshold, keys and values are stored in unsorted parallel
 // arrays. Lookups use linear scan, which is fast for small sizes due to
 // cache-friendly sequential memory access and no hash computation overhead.
