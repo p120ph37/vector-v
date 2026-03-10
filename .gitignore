@@ -11,5 +11,6 @@ src/main
 bench/rust-vrl/target/
 bench/rust-vrl/Cargo.lock
 
-# V bench binary
+# V bench binaries
 bench/v-vrl/bench
+bench/v-vrl-jit/bench
