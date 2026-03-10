@@ -6,3 +6,10 @@ vector-v
 # V cache
 .cache/
 src/main
+
+# Rust build artifacts
+bench/rust-vrl/target/
+bench/rust-vrl/Cargo.lock
+
+# V bench binary
+bench/v-vrl/bench
