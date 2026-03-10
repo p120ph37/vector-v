@@ -132,5 +132,83 @@ pub fn is_truthy(v VrlValue) bool {
 
 // values_equal checks if two VrlValues are equal.
 pub fn values_equal(a VrlValue, b VrlValue) bool {
-	return vrl_to_json(a) == vrl_to_json(b)
+	match a {
+		int {
+			match b {
+				int { return a == b }
+				f64 { return f64(a) == b }
+				else { return false }
+			}
+		}
+		f64 {
+			match b {
+				f64 { return a == b }
+				int { return a == f64(b) }
+				else { return false }
+			}
+		}
+		string {
+			match b {
+				string { return a == b }
+				else { return false }
+			}
+		}
+		bool {
+			match b {
+				bool { return a == b }
+				else { return false }
+			}
+		}
+		VrlNull {
+			return b is VrlNull
+		}
+		[]VrlValue {
+			match b {
+				[]VrlValue {
+					if a.len != b.len {
+						return false
+					}
+					for i in 0 .. a.len {
+						if !values_equal(a[i], b[i]) {
+							return false
+						}
+					}
+					return true
+				}
+				else { return false }
+			}
+		}
+		map[string]VrlValue {
+			match b {
+				map[string]VrlValue {
+					if a.len != b.len {
+						return false
+					}
+					for k, v in a {
+						if bv := b[k] {
+							if !values_equal(v, bv) {
+								return false
+							}
+						} else {
+							return false
+						}
+					}
+					return true
+				}
+				else { return false }
+			}
+		}
+		Timestamp {
+			match b {
+				Timestamp { return a.t == b.t }
+				else { return false }
+			}
+		}
+		VrlRegex {
+			match b {
+				VrlRegex { return a.pattern == b.pattern }
+				else { return false }
+			}
+		}
+	}
 }
