@@ -1,5 +1,27 @@
 module vrl
 
+// NOTE: JIT compilation via libtcc was explored and removed.
+//
+// A TCC-based JIT compiled VRL ASTs to C, then to native code at runtime.
+// While the generated native code itself executed very fast, the overhead of
+// translating between V data structures (maps, sum-type values) and C structs
+// on every call dominated execution time. Even after eliminating JSON
+// serialization and using a direct memory interface with typed setter/getter
+// functions, the V↔C marshaling cost made JIT consistently slower than the
+// tree-walking interpreter for typical workloads.
+//
+// The interpreter (with optimizations like fast single-segment path access,
+// direct structural equality, byte-level operator dispatch, and inlined
+// stdlib fast paths) already matches or beats the upstream Rust VRL
+// implementation on most benchmarks when compiled with -prod -cc clang.
+//
+// Benchmark results (100K iterations, -prod -cc clang vs Rust --release):
+//   field_assign:  V 306ns  vs Rust 196ns  (1.56x)
+//   downcase:      V 379ns  vs Rust 317ns  (1.20x)
+//   conditional:   V 507ns  vs Rust 555ns  (V wins)
+//   multi_ops:     V 730ns  vs Rust 921ns  (V wins)
+//   arithmetic:    V 688ns  vs Rust 944ns  (V wins)
+
 // Runtime evaluates VRL AST nodes against an object context.
 pub struct Runtime {
 mut:
