@@ -16,41 +16,51 @@ module vrl
 // implementation on most benchmarks when compiled with -prod -cc clang.
 //
 // Benchmark results (100K iterations, -prod -cc clang vs Rust --release):
-//   field_assign:  V 306ns  vs Rust 196ns  (1.56x)
-//   downcase:      V 379ns  vs Rust 317ns  (1.20x)
-//   conditional:   V 507ns  vs Rust 555ns  (V wins)
-//   multi_ops:     V 730ns  vs Rust 921ns  (V wins)
-//   arithmetic:    V 688ns  vs Rust 944ns  (V wins)
+//   field_assign:  V 255ns  vs Rust 197ns  (1.29x)
+//   downcase:      V 259ns  vs Rust 319ns  (V wins 1.23x)
+//   conditional:   V 423ns  vs Rust 561ns  (V wins 1.33x)
+//   multi_ops:     V 633ns  vs Rust 932ns  (V wins 1.47x)
+//   arithmetic:    V 714ns  vs Rust 943ns  (V wins 1.32x)
+//
+// The Runtime uses SmallMap (flat-array map) instead of V's built-in hash map.
+// For typical Vector events (1-16 fields), linear scan beats hashing due to
+// no hash computation and better cache locality — similar to how Rust's BTreeMap
+// uses a single sorted node for small collections.
 
 // Runtime evaluates VRL AST nodes against an object context.
+// Uses SmallMap (flat-array map) instead of V's built-in hash map for the
+// hot-path object/metadata/vars storage. For typical Vector events with 1-16
+// fields, linear scan over contiguous memory is faster than hash lookup due
+// to no hash computation and better cache locality. This is analogous to how
+// Rust's BTreeMap stores small collections in a single sorted node.
 pub struct Runtime {
 mut:
-	object   map[string]VrlValue // The root object (.)
-	metadata map[string]VrlValue // Metadata (%)
-	vars     map[string]VrlValue // Local variables
+	object   SmallMap // The root object (.)
+	metadata SmallMap // Metadata (%)
+	vars     SmallMap // Local variables
 	aborted  bool
 	abort_msg string
 }
 
 pub fn new_runtime() Runtime {
 	return Runtime{
-		object: map[string]VrlValue{}
-		metadata: map[string]VrlValue{}
-		vars: map[string]VrlValue{}
+		object: new_small_map()
+		metadata: new_small_map()
+		vars: new_small_map()
 	}
 }
 
 pub fn new_runtime_with_object(obj map[string]VrlValue) Runtime {
 	return Runtime{
-		object: obj.clone()
-		metadata: map[string]VrlValue{}
-		vars: map[string]VrlValue{}
+		object: small_map_from_map(obj)
+		metadata: new_small_map()
+		vars: new_small_map()
 	}
 }
 
-// get_object returns the current root object.
+// get_object returns the current root object as a standard map.
 pub fn (rt &Runtime) get_object() map[string]VrlValue {
-	return copy_map(rt.object)
+	return rt.object.to_map()
 }
 
 // execute compiles and runs a VRL program, returning the result.
@@ -87,7 +97,7 @@ pub fn (mut rt Runtime) eval(expr Expr) !VrlValue {
 			return rt.eval_binary(expr)
 		}
 		IdentExpr {
-			if val := rt.vars[expr.name] {
+			if val := rt.vars.get(expr.name) {
 				return val
 			}
 			return VrlValue(VrlNull{})
@@ -253,45 +263,51 @@ fn (mut rt Runtime) eval_binary(expr BinaryExpr) !VrlValue {
 // Path access — avoids full object copy for simple lookups.
 fn (rt &Runtime) get_path(path string) !VrlValue {
 	if path == '.' {
-		return VrlValue(copy_map(rt.object))
+		return VrlValue(rt.object.to_map())
 	}
 	clean := if path.starts_with('.') { path[1..] } else { path }
 
 	// Fast path for single-segment (no dots) — most common case
 	if !clean.contains('.') {
-		if val := rt.object[clean] {
+		if val := rt.object.get(clean) {
 			return val
 		}
 		return VrlValue(VrlNull{})
 	}
 
+	// Multi-segment: first key from SmallMap, then traverse nested map[string]VrlValue
 	parts := clean.split('.')
-	mut current := VrlValue(rt.object.clone())
-
-	for part in parts {
-		cur := current
-		match cur {
-			map[string]VrlValue {
-				if val := cur[part] {
-					current = val
-				} else {
+	if val := rt.object.get(parts[0]) {
+		if parts.len == 1 {
+			return val
+		}
+		mut current := val
+		for i in 1 .. parts.len {
+			cur := current
+			match cur {
+				map[string]VrlValue {
+					if next := cur[parts[i]] {
+						current = next
+					} else {
+						return VrlValue(VrlNull{})
+					}
+				}
+				else {
 					return VrlValue(VrlNull{})
 				}
 			}
-			else {
-				return VrlValue(VrlNull{})
-			}
 		}
+		return current
 	}
-	return current
+	return VrlValue(VrlNull{})
 }
 
 fn (rt &Runtime) get_meta(path string) !VrlValue {
 	if path == '%' {
-		return VrlValue(copy_map(rt.metadata))
+		return VrlValue(rt.metadata.to_map())
 	}
 	clean := if path.starts_with('%') { path[1..] } else { path }
-	if val := rt.metadata[clean] {
+	if val := rt.metadata.get(clean) {
 		return val
 	}
 	return VrlValue(VrlNull{})
@@ -305,7 +321,7 @@ fn (mut rt Runtime) assign_to(target Expr, val VrlValue) {
 				v := val
 				match v {
 					map[string]VrlValue {
-						rt.object = v.clone()
+						rt.object = small_map_from_map(v)
 					}
 					else {}
 				}
@@ -314,28 +330,28 @@ fn (mut rt Runtime) assign_to(target Expr, val VrlValue) {
 			clean := if target.path.starts_with('.') { target.path[1..] } else { target.path }
 			// Fast path: single segment (no dot) — most common case
 			if !clean.contains('.') {
-				rt.object[clean] = val
+				rt.object.set(clean, val)
 				return
 			}
 			parts := clean.split('.')
 			rt.set_nested_path(parts, val)
 		}
 		IdentExpr {
-			rt.vars[target.name] = val
+			rt.vars.set(target.name, val)
 		}
 		MetaPathExpr {
 			if target.path == '%' {
 				v := val
 				match v {
 					map[string]VrlValue {
-						rt.metadata = v.clone()
+						rt.metadata = small_map_from_map(v)
 					}
 					else {}
 				}
 				return
 			}
 			clean := if target.path.starts_with('%') { target.path[1..] } else { target.path }
-			rt.metadata[clean] = val
+			rt.metadata.set(clean, val)
 		}
 		else {}
 	}
@@ -344,20 +360,19 @@ fn (mut rt Runtime) assign_to(target Expr, val VrlValue) {
 fn (mut rt Runtime) set_nested_path(parts []string, val VrlValue) {
 	if parts.len <= 1 {
 		if parts.len == 1 {
-			rt.object[parts[0]] = val
+			rt.object.set(parts[0], val)
 		}
 		return
 	}
 	if parts.len == 2 {
 		top := parts[0]
-		if top in rt.object {
-			existing := rt.object[top] or { VrlValue(map[string]VrlValue{}) }
+		if existing := rt.object.get(top) {
 			e := existing
 			match e {
 				map[string]VrlValue {
 					mut m := copy_map(e)
 					m[parts[1]] = val
-					rt.object[top] = VrlValue(m)
+					rt.object.set(top, VrlValue(m))
 					return
 				}
 				else {}
@@ -365,7 +380,7 @@ fn (mut rt Runtime) set_nested_path(parts []string, val VrlValue) {
 		}
 		mut m := map[string]VrlValue{}
 		m[parts[1]] = val
-		rt.object[top] = VrlValue(m)
+		rt.object.set(top, VrlValue(m))
 		return
 	}
 	// 3+ levels: build nested maps
@@ -377,7 +392,7 @@ fn (mut rt Runtime) set_deep_path(parts []string, val VrlValue) {
 		return
 	}
 	if parts.len == 1 {
-		rt.object[parts[0]] = val
+		rt.object.set(parts[0], val)
 		return
 	}
 	// Build from inside out
@@ -389,7 +404,7 @@ fn (mut rt Runtime) set_deep_path(parts []string, val VrlValue) {
 		current = VrlValue(m)
 		i--
 	}
-	rt.object[parts[0]] = current
+	rt.object.set(parts[0], current)
 }
 
 fn (mut rt Runtime) merge_assign(target Expr, val VrlValue) {
@@ -399,7 +414,7 @@ fn (mut rt Runtime) merge_assign(target Expr, val VrlValue) {
 			match v {
 				map[string]VrlValue {
 					for k, item in v {
-						rt.object[k] = item
+						rt.object.set(k, item)
 					}
 				}
 				else {}
