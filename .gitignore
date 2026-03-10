@@ -1,0 +1,7 @@
+# V build artifacts
+vector-v
+*.o
+*.tmp
+
+# V cache
+.cache/

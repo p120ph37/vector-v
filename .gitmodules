@@ -1,0 +1,6 @@
+[submodule "upstream/vector"]
+	path = upstream/vector
+	url = https://github.com/vectordotdev/vector.git
+[submodule "upstream/vrl"]
+	path = upstream/vrl
+	url = https://github.com/vectordotdev/vrl.git
