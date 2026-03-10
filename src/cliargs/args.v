@@ -1,4 +1,4 @@
-module cli
+module cliargs
 
 import os
 

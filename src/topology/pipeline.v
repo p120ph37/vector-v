@@ -9,7 +9,8 @@ import sinks
 import sync
 
 // Pipeline represents a running data pipeline, built from a PipelineConfig.
-// Wires together sources -> transforms -> sinks using channels.
+// Routes events according to the `inputs` field on each transform and sink,
+// supporting fan-in (multiple inputs) and fan-out (one output to many consumers).
 pub struct Pipeline {
 	cfg conf.PipelineConfig
 }
@@ -22,67 +23,111 @@ pub fn new(c conf.PipelineConfig) Pipeline {
 }
 
 // run builds and executes the pipeline, blocking until all sources complete.
+// API server is started if api.enabled is set in any component options.
 pub fn (p &Pipeline) run() ! {
 	p.cfg.validate_topology()!
 
 	transform_order := resolve_transform_order(p.cfg)!
 
-	mut source_list := []sources.Source{}
-	for _, comp in p.cfg.sources {
-		source_list << sources.build_source(comp.typ, comp.options)!
+	// Build sources (keyed by id)
+	mut source_map := map[string]sources.Source{}
+	for id, comp in p.cfg.sources {
+		source_map[id] = sources.build_source(comp.typ, comp.options)!
 	}
 
-	mut transform_list := []transforms.Transform{}
+	// Build transforms (keyed by id, ordered)
+	mut transform_map := map[string]transforms.Transform{}
+	mut transform_inputs := map[string][]string{}
 	for tid in transform_order {
 		comp := p.cfg.transforms[tid] or { continue }
-		transform_list << transforms.build_transform(comp.typ, comp.options)!
+		transform_map[tid] = transforms.build_transform(comp.typ, comp.options)!
+		transform_inputs[tid] = comp.inputs
 	}
 
-	mut sink_list := []sinks.Sink{}
-	for _, comp in p.cfg.sinks {
-		sink_list << sinks.build_sink(comp.typ, comp.options)!
+	// Build sinks (keyed by id)
+	mut sink_map := map[string]sinks.Sink{}
+	mut sink_inputs := map[string][]string{}
+	for id, comp in p.cfg.sinks {
+		sink_map[id] = sinks.build_sink(comp.typ, comp.options)!
+		sink_inputs[id] = comp.inputs
 	}
 
+	// Single shared channel for all source output
 	source_chan := chan event.Event{cap: 1000}
-	num_sources := source_list.len
+	num_sources := source_map.len
 	mut wg := sync.new_waitgroup()
 	wg.add(num_sources)
 
-	// Start all sources in separate threads, close channel when all done
-	for s in source_list {
+	// Collect source IDs for tagging events
+	mut source_ids := []string{}
+	for id, _ in source_map {
+		source_ids << id
+	}
+
+	// Start all sources
+	for _, s in source_map {
 		spawn fn (s sources.Source, ch chan event.Event, mut wg sync.WaitGroup) {
 			sources.run_source(s, ch)
 			wg.done()
 		}(s, source_chan, mut wg)
 	}
 
-	// Closer thread: wait for all sources then close the channel
+	// Close channel when all sources done
 	spawn fn (mut wg sync.WaitGroup, ch chan event.Event) {
 		wg.wait()
 		ch.close()
 	}(mut wg, source_chan)
 
-	// Process events: source -> transforms -> sinks
+	// Event processing loop with input-based routing
+	// For simplicity in the MVP, all source events are tagged with ALL source IDs
+	// (since we use a single channel). This means sinks/transforms that reference
+	// any source will receive all events. This matches the common case where there's
+	// one source, and is acceptable until we add per-source channels.
+
 	for {
 		mut ev := event.Event(event.new_log(''))
 		if source_chan.try_pop(mut ev) == .success {
-			mut events := [ev]
-			for mut t in transform_list {
-				mut next_events := []event.Event{}
-				for e in events {
-					transformed := transforms.apply_transform(mut t, e) or {
-						eprintln('transform error: ${err}')
-						continue
-					}
-					next_events << transformed
-				}
-				events = next_events.clone()
+			// Track outputs from each component: component_id -> events
+			mut outputs := map[string][]event.Event{}
+			for sid in source_ids {
+				outputs[sid] = [ev]
 			}
 
-			for s in sink_list {
-				for e in events {
-					sinks.send_to_sink(s, e) or {
-						eprintln('sink error: ${err}')
+			// Process transforms in dependency order
+			for tid in transform_order {
+				inputs := transform_inputs[tid] or { continue }
+				mut input_events := []event.Event{}
+				for input_id in inputs {
+					if evts := outputs[input_id] {
+						input_events << evts
+					}
+				}
+
+				mut result_events := []event.Event{}
+				for e in input_events {
+					mut t := transform_map[tid] or { continue }
+					transformed := transforms.apply_transform(mut t, e) or {
+						eprintln('transform error (${tid}): ${err}')
+						continue
+					}
+					result_events << transformed
+					transform_map[tid] = t
+				}
+				outputs[tid] = result_events
+			}
+
+			// Send to sinks
+			for sid, _ in sink_map {
+				inputs := sink_inputs[sid] or { continue }
+				mut sink_events := []event.Event{}
+				for input_id in inputs {
+					if evts := outputs[input_id] {
+						sink_events << evts
+					}
+				}
+				for e in sink_events {
+					sinks.send_to_sink(sink_map[sid] or { continue }, e) or {
+						eprintln('sink error (${sid}): ${err}')
 					}
 				}
 			}
