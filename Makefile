@@ -24,11 +24,11 @@ run-demo:
 	echo "hello world" | ./vector-v -c examples/stdin_to_stdout.toml
 
 bench-v:
-	v -path "src|@vlib|@vmodules" -o bench/v-vrl/bench bench/v-vrl/bench.v
+	v -prod -cc clang -path "src|@vlib|@vmodules" -o bench/v-vrl/bench bench/v-vrl/bench.v
 	bench/v-vrl/bench
 
 bench-jit:
-	v -d jit -path "src|@vlib|@vmodules" -o bench/v-vrl-jit/bench bench/v-vrl-jit/bench.v
+	v -prod -cc clang -d jit -path "src|@vlib|@vmodules" -o bench/v-vrl-jit/bench bench/v-vrl-jit/bench.v
 	bench/v-vrl-jit/bench
 
 bench-rust:

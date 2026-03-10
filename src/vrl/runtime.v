@@ -19,12 +19,8 @@ pub fn new_runtime() Runtime {
 }
 
 pub fn new_runtime_with_object(obj map[string]VrlValue) Runtime {
-	mut o := map[string]VrlValue{}
-	for k, v in obj {
-		o[k] = v
-	}
 	return Runtime{
-		object: o
+		object: obj.clone()
 		metadata: map[string]VrlValue{}
 		vars: map[string]VrlValue{}
 	}
@@ -47,79 +43,82 @@ pub fn execute(source string, obj map[string]VrlValue) !VrlValue {
 
 // eval evaluates an AST expression.
 pub fn (mut rt Runtime) eval(expr Expr) !VrlValue {
-	if expr is LiteralExpr {
-		return expr.value
-	}
-	if expr is ArrayExpr {
-		return rt.eval_array(expr)
-	}
-	if expr is ObjectExpr {
-		return rt.eval_object(expr)
-	}
-	if expr is IdentExpr {
-		if val := rt.vars[expr.name] {
+	match expr {
+		LiteralExpr {
+			return expr.value
+		}
+		PathExpr {
+			return rt.get_path(expr.path)
+		}
+		AssignExpr {
+			val := rt.eval(expr.value[0])!
+			rt.assign_to(expr.target[0], val)
 			return val
 		}
-		return VrlValue(VrlNull{})
-	}
-	if expr is PathExpr {
-		return rt.get_path(expr.path)
-	}
-	if expr is MetaPathExpr {
-		return rt.get_meta(expr.path)
-	}
-	if expr is UnaryExpr {
-		val := rt.eval(expr.expr[0])!
-		if expr.op == '-' {
-			return negate_value(val)
+		BlockExpr {
+			return rt.eval_block(expr)
 		}
-		return val
-	}
-	if expr is NotExpr {
-		val := rt.eval(expr.expr[0])!
-		b := !is_truthy(val)
-		return VrlValue(b)
-	}
-	if expr is BinaryExpr {
-		return rt.eval_binary(expr)
-	}
-	if expr is AssignExpr {
-		val := rt.eval(expr.value[0])!
-		rt.assign_to(expr.target[0], val)
-		return val
-	}
-	if expr is MergeAssignExpr {
-		val := rt.eval(expr.value[0])!
-		rt.merge_assign(expr.target[0], val)
-		return rt.eval(expr.target[0])
-	}
-	if expr is IfExpr {
-		return rt.eval_if(expr)
-	}
-	if expr is BlockExpr {
-		return rt.eval_block(expr)
-	}
-	if expr is FnCallExpr {
-		return rt.eval_fn_call(expr)
-	}
-	if expr is IndexExpr {
-		container := rt.eval(expr.expr[0])!
-		index := rt.eval(expr.index[0])!
-		return index_into(container, index)
-	}
-	if expr is CoalesceExpr {
-		return rt.eval_coalesce(expr)
-	}
-	if expr is AbortExpr {
-		rt.aborted = true
-		if expr.message.len > 0 {
-			msg_val := rt.eval(expr.message[0])!
-			rt.abort_msg = vrl_to_string(msg_val)
+		FnCallExpr {
+			return rt.eval_fn_call(expr)
 		}
-		return VrlValue(VrlNull{})
+		BinaryExpr {
+			return rt.eval_binary(expr)
+		}
+		IdentExpr {
+			if val := rt.vars[expr.name] {
+				return val
+			}
+			return VrlValue(VrlNull{})
+		}
+		IfExpr {
+			return rt.eval_if(expr)
+		}
+		UnaryExpr {
+			val := rt.eval(expr.expr[0])!
+			if expr.op == '-' {
+				return negate_value(val)
+			}
+			return val
+		}
+		NotExpr {
+			val := rt.eval(expr.expr[0])!
+			b := !is_truthy(val)
+			return VrlValue(b)
+		}
+		ArrayExpr {
+			return rt.eval_array(expr)
+		}
+		ObjectExpr {
+			return rt.eval_object(expr)
+		}
+		MetaPathExpr {
+			return rt.get_meta(expr.path)
+		}
+		MergeAssignExpr {
+			val := rt.eval(expr.value[0])!
+			rt.merge_assign(expr.target[0], val)
+			return rt.eval(expr.target[0])
+		}
+		IndexExpr {
+			container := rt.eval(expr.expr[0])!
+			index := rt.eval(expr.index[0])!
+			return index_into(container, index)
+		}
+		CoalesceExpr {
+			return rt.eval_coalesce(expr)
+		}
+		AbortExpr {
+			rt.aborted = true
+			if expr.message.len > 0 {
+				msg_val := rt.eval(expr.message[0])!
+				rt.abort_msg = vrl_to_string(msg_val)
+			}
+			return VrlValue(VrlNull{})
+		}
+		ClosureExpr {
+			return VrlValue(VrlNull{})
+		}
 	}
-	// ClosureExpr or unknown
-	return VrlValue(VrlNull{})
 }
 
 fn (mut rt Runtime) eval_array(expr ArrayExpr) !VrlValue {
@@ -173,14 +172,18 @@ fn (mut rt Runtime) eval_coalesce(expr CoalesceExpr) !VrlValue {
 }
 
 fn (mut rt Runtime) eval_binary(expr BinaryExpr) !VrlValue {
-	if expr.op == '||' {
+	// Use first byte for fast operator dispatch
+	op0 := expr.op[0]
+	if op0 == `|` && expr.op.len == 2 {
+		// ||
 		left := rt.eval(expr.left[0])!
 		if is_truthy(left) {
 			return left
 		}
 		return rt.eval(expr.right[0])
 	}
-	if expr.op == '&&' {
+	if op0 == `&` && expr.op.len == 2 {
+		// &&
 		left := rt.eval(expr.left[0])!
 		if !is_truthy(left) {
 			return left
@@ -191,30 +194,57 @@ fn (mut rt Runtime) eval_binary(expr BinaryExpr) !VrlValue {
 	left := rt.eval(expr.left[0])!
 	right := rt.eval(expr.right[0])!
 
-	return match expr.op {
-		'+' { arith_add(left, right) }
-		'-' { arith_sub(left, right) }
-		'*' { arith_mul(left, right) }
-		'/' { arith_div(left, right) }
-		'%' { arith_mod(left, right) }
-		'==' { VrlValue(values_equal(left, right)) }
-		'!=' { VrlValue(!values_equal(left, right)) }
-		'<' { compare_values(left, right, '<') }
-		'>' { compare_values(left, right, '>') }
-		'<=' { compare_values(left, right, '<=') }
-		'>=' { compare_values(left, right, '>=') }
-		else { error('unknown operator: ${expr.op}') }
+	match op0 {
+		`+` { return arith_add(left, right) }
+		`-` { return arith_sub(left, right) }
+		`*` { return arith_mul(left, right) }
+		`/` { return arith_div(left, right) }
+		`%` { return arith_mod(left, right) }
+		`=` {
+			// ==
+			return VrlValue(values_equal(left, right))
+		}
+		`!` {
+			// !=
+			return VrlValue(!values_equal(left, right))
+		}
+		`<` {
+			if expr.op.len == 1 {
+				return compare_values_lt(left, right)
+			}
+			// <=
+			return compare_values_le(left, right)
+		}
+		`>` {
+			if expr.op.len == 1 {
+				return compare_values_gt(left, right)
+			}
+			// >=
+			return compare_values_ge(left, right)
+		}
+		else {
+			return error('unknown operator: ${expr.op}')
+		}
 	}
 }
 
-// Path access
+// Path access — avoids full object copy for simple lookups.
 fn (rt &Runtime) get_path(path string) !VrlValue {
 	if path == '.' {
 		return VrlValue(copy_map(rt.object))
 	}
 	clean := if path.starts_with('.') { path[1..] } else { path }
+
+	// Fast path for single-segment (no dots) — most common case
+	if !clean.contains('.') {
+		if val := rt.object[clean] {
+			return val
+		}
+		return VrlValue(VrlNull{})
+	}
+
 	parts := clean.split('.')
-	mut current := VrlValue(copy_map(rt.object))
+	mut current := VrlValue(rt.object.clone())
 
 	for part in parts {
 		cur := current
@@ -247,44 +277,45 @@ fn (rt &Runtime) get_meta(path string) !VrlValue {
 
 // Assignment
 fn (mut rt Runtime) assign_to(target Expr, val VrlValue) {
-	if target is PathExpr {
-		if target.path == '.' {
-			v := val
-			match v {
-				map[string]VrlValue {
-					rt.object = copy_map(v)
+	match target {
+		PathExpr {
+			if target.path == '.' {
+				v := val
+				match v {
+					map[string]VrlValue {
+						rt.object = v.clone()
+					}
+					else {}
 				}
-				else {}
+				return
 			}
-			return
-		}
-		clean := if target.path.starts_with('.') { target.path[1..] } else { target.path }
-		parts := clean.split('.')
-		if parts.len == 1 {
-			rt.object[parts[0]] = val
-		} else {
+			clean := if target.path.starts_with('.') { target.path[1..] } else { target.path }
+			// Fast path: single segment (no dot) — most common case
+			if !clean.contains('.') {
+				rt.object[clean] = val
+				return
+			}
+			parts := clean.split('.')
 			rt.set_nested_path(parts, val)
 		}
-		return
-	}
-	if target is IdentExpr {
-		rt.vars[target.name] = val
-		return
-	}
-	if target is MetaPathExpr {
-		if target.path == '%' {
-			v := val
-			match v {
-				map[string]VrlValue {
-					rt.metadata = copy_map(v)
-				}
-				else {}
-			}
-			return
+		IdentExpr {
+			rt.vars[target.name] = val
 		}
-		clean := if target.path.starts_with('%') { target.path[1..] } else { target.path }
-		rt.metadata[clean] = val
-		return
+		MetaPathExpr {
+			if target.path == '%' {
+				v := val
+				match v {
+					map[string]VrlValue {
+						rt.metadata = v.clone()
+					}
+					else {}
+				}
+				return
+			}
+			clean := if target.path.starts_with('%') { target.path[1..] } else { target.path }
+			rt.metadata[clean] = val
+		}
+		else {}
 	}
 }
 
@@ -498,27 +529,27 @@ fn negate_value(v VrlValue) !VrlValue {
 	}
 }
 
-fn compare_values(left VrlValue, right VrlValue, op string) !VrlValue {
+fn compare_values_lt(left VrlValue, right VrlValue) !VrlValue {
 	l := left
 	r := right
 	match l {
 		int {
 			match r {
-				int { return VrlValue(cmp_int(l, r, op)) }
-				f64 { return VrlValue(cmp_f64(f64(l), r, op)) }
+				int { return VrlValue(l < r) }
+				f64 { return VrlValue(f64(l) < r) }
 				else {}
 			}
 		}
 		f64 {
 			match r {
-				int { return VrlValue(cmp_f64(l, f64(r), op)) }
-				f64 { return VrlValue(cmp_f64(l, r, op)) }
+				int { return VrlValue(l < f64(r)) }
+				f64 { return VrlValue(l < r) }
 				else {}
 			}
 		}
 		string {
 			match r {
-				string { return VrlValue(cmp_str(l, r, op)) }
+				string { return VrlValue(l < r) }
 				else {}
 			}
 		}
@@ -527,25 +558,91 @@ fn compare_values(left VrlValue, right VrlValue, op string) !VrlValue {
 	return error("can't compare these types")
 }
 
-fn cmp_int(a int, b int, op string) bool {
-	if op == '<' { return a < b }
-	if op == '>' { return a > b }
-	if op == '<=' { return a <= b }
-	return a >= b
+fn compare_values_gt(left VrlValue, right VrlValue) !VrlValue {
+	l := left
+	r := right
+	match l {
+		int {
+			match r {
+				int { return VrlValue(l > r) }
+				f64 { return VrlValue(f64(l) > r) }
+				else {}
+			}
+		}
+		f64 {
+			match r {
+				int { return VrlValue(l > f64(r)) }
+				f64 { return VrlValue(l > r) }
+				else {}
+			}
+		}
+		string {
+			match r {
+				string { return VrlValue(l > r) }
+				else {}
+			}
+		}
+		else {}
+	}
+	return error("can't compare these types")
 }
 
-fn cmp_f64(a f64, b f64, op string) bool {
-	if op == '<' { return a < b }
-	if op == '>' { return a > b }
-	if op == '<=' { return a <= b }
-	return a >= b
+fn compare_values_le(left VrlValue, right VrlValue) !VrlValue {
+	l := left
+	r := right
+	match l {
+		int {
+			match r {
+				int { return VrlValue(l <= r) }
+				f64 { return VrlValue(f64(l) <= r) }
+				else {}
+			}
+		}
+		f64 {
+			match r {
+				int { return VrlValue(l <= f64(r)) }
+				f64 { return VrlValue(l <= r) }
+				else {}
+			}
+		}
+		string {
+			match r {
+				string { return VrlValue(l <= r) }
+				else {}
+			}
+		}
+		else {}
+	}
+	return error("can't compare these types")
 }
 
-fn cmp_str(a string, b string, op string) bool {
-	if op == '<' { return a < b }
-	if op == '>' { return a > b }
-	if op == '<=' { return a <= b }
-	return a >= b
+fn compare_values_ge(left VrlValue, right VrlValue) !VrlValue {
+	l := left
+	r := right
+	match l {
+		int {
+			match r {
+				int { return VrlValue(l >= r) }
+				f64 { return VrlValue(f64(l) >= r) }
+				else {}
+			}
+		}
+		f64 {
+			match r {
+				int { return VrlValue(l >= f64(r)) }
+				f64 { return VrlValue(l >= r) }
+				else {}
+			}
+		}
+		string {
+			match r {
+				string { return VrlValue(l >= r) }
+				else {}
+			}
+		}
+		else {}
+	}
+	return error("can't compare these types")
 }
 
 fn index_into(container VrlValue, index VrlValue) !VrlValue {

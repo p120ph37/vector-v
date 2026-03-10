@@ -2,10 +2,10 @@ module vrl
 
 // eval_fn_call dispatches built-in VRL functions.
 fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
-	name := if expr.name.ends_with('!') {
-		expr.name[..expr.name.len - 1]
-	} else {
-		expr.name
+	// Strip trailing '!' more efficiently using byte check
+	mut name := expr.name
+	if name.len > 0 && name[name.len - 1] == `!` {
+		name = name[..name.len - 1]
 	}
 
 	// Special functions that need unevaluated args (PathExpr)
@@ -14,7 +14,80 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 	if name == 'filter' { return rt.fn_filter(expr) }
 	if name == 'for_each' { return rt.fn_for_each(expr) }
 
-	// Evaluate args
+	// Fast path for common 1-arg functions: evaluate arg directly without []VrlValue alloc
+	if expr.args.len == 1 {
+		a0 := rt.eval(expr.args[0])!
+		match name {
+			'downcase' {
+				v := a0
+				match v {
+					string { return VrlValue(v.to_lower()) }
+					else { return error('downcase requires a string argument') }
+				}
+			}
+			'upcase' {
+				v := a0
+				match v {
+					string { return VrlValue(v.to_upper()) }
+					else { return error('upcase requires a string argument') }
+				}
+			}
+			'to_string', 'format_number' { return VrlValue(vrl_to_string(a0)) }
+			'to_int', 'int' { return fn_to_int([a0]) }
+			'to_float', 'float' { return fn_to_float([a0]) }
+			'to_bool', 'bool' { return fn_to_bool([a0]) }
+			'string' { return fn_string([a0]) }
+			'length', 'strlen' { return fn_length([a0]) }
+			'strip_whitespace', 'trim' { return fn_strip_whitespace([a0]) }
+			'is_string' { return VrlValue(a0 is string) }
+			'is_integer' { return VrlValue(a0 is int) }
+			'is_float' { return VrlValue(a0 is f64) }
+			'is_boolean' { return VrlValue(a0 is bool) }
+			'is_null' { return VrlValue(a0 is VrlNull) }
+			'is_array' { return VrlValue(a0 is []VrlValue) }
+			'is_object' { return VrlValue(a0 is map[string]VrlValue) }
+			'is_nullish' { return fn_is_nullish([a0]) }
+			'encode_json' { return VrlValue(vrl_to_json(a0)) }
+			'decode_json', 'parse_json' { return fn_decode_json([a0]) }
+			'keys' { return fn_keys([a0]) }
+			'values' { return fn_values([a0]) }
+			'flatten' { return fn_flatten([a0]) }
+			'unflatten' { return fn_unflatten([a0]) }
+			'compact' { return fn_compact([a0]) }
+			'abs' { return fn_abs([a0]) }
+			'ceil' { return fn_ceil([a0]) }
+			'floor' { return fn_floor([a0]) }
+			'round' { return fn_round([a0]) }
+			'type_def' { return fn_type_def([a0]) }
+			'array' { return fn_ensure_array([a0]) }
+			'object' { return fn_ensure_object([a0]) }
+			'map_keys', 'map_values' { return a0 }
+			else {}
+		}
+		// Fall through to 2-arg path or general path
+	}
+
+	// Fast path for common 2-arg functions
+	if expr.args.len == 2 {
+		a0 := if expr.args.len >= 1 { rt.eval(expr.args[0])! } else { VrlValue(VrlNull{}) }
+		a1 := rt.eval(expr.args[1])!
+		match name {
+			'contains' { return fn_contains([a0, a1]) }
+			'starts_with' { return fn_starts_with([a0, a1]) }
+			'ends_with' { return fn_ends_with([a0, a1]) }
+			'split' { return fn_split([a0, a1]) }
+			'join' { return fn_join([a0, a1]) }
+			'merge' { return fn_merge([a0, a1]) }
+			'push' { return fn_push([a0, a1]) }
+			'append' { return fn_append([a0, a1]) }
+			'mod' { return fn_mod([a0, a1]) }
+			'slice' { return fn_slice([a0, a1]) }
+			'truncate' { return fn_truncate([a0, a1]) }
+			else {}
+		}
+	}
+
+	// General path: evaluate all args into array
 	mut args := []VrlValue{}
 	for arg in expr.args {
 		val := rt.eval(arg)!

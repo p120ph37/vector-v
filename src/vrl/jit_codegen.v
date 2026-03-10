@@ -693,6 +693,41 @@ static Val val_index(Val c, Val idx) {
     if (c.type == VT_OBJECT && idx.type == VT_STRING) return vo_get(c, idx.u.s.p);
     return vn();
 }
+
+/* ---- Direct interface (no JSON round-trip) ---- */
+static Val _g_ctx;
+static Val _g_meta;
+
+void jit_init(void) {
+    jit_arena_reset();
+    _g_ctx = vo_new();
+    _g_meta = vo_new();
+}
+
+void jit_set_str(const char *key, const char *val, int vlen) {
+    vo_set(&_g_ctx, key, vs(val, vlen));
+}
+void jit_set_int(const char *key, int64_t val) {
+    vo_set(&_g_ctx, key, vi(val));
+}
+void jit_set_float(const char *key, double val) {
+    vo_set(&_g_ctx, key, vf(val));
+}
+void jit_set_bool(const char *key, int val) {
+    vo_set(&_g_ctx, key, vb(val));
+}
+
+int jit_result_len(void) { return _g_ctx.type == VT_OBJECT ? _g_ctx.u.o.len : 0; }
+const char* jit_result_key(int i) { return _g_ctx.u.o.keys[i]; }
+int jit_result_type(int i) { return _g_ctx.u.o.vals[i].type; }
+const char* jit_result_str_ptr(int i) { return _g_ctx.u.o.vals[i].u.s.p; }
+int jit_result_str_len(int i) { return _g_ctx.u.o.vals[i].u.s.n; }
+int64_t jit_result_int_val(int i) { return _g_ctx.u.o.vals[i].u.i; }
+double jit_result_float_val(int i) { return _g_ctx.u.o.vals[i].u.f; }
+int jit_result_bool_val(int i) { return _g_ctx.u.o.vals[i].u.b; }
+int jit_result_json(int i, char *buf, int cap) {
+    return json_serialize(_g_ctx.u.o.vals[i], buf, cap);
+}
 '
 
 // JitCodegen walks the AST and emits C source code.
@@ -715,6 +750,8 @@ fn new_jit_codegen() JitCodegen {
 // Returns the C source string, or an error if the AST contains unsupported constructs.
 fn (mut g JitCodegen) generate(expr Expr) !string {
 	g.buf.write_string(jit_c_preamble)
+
+	// Legacy JSON-based entry point
 	g.buf.write_string('\nint jit_eval(const char *in_json, int in_len, char *out_json, int out_cap) {\n')
 	g.buf.write_string('    jit_arena_reset();\n')
 	g.buf.write_string('    int _parse_pos = 0;\n')
@@ -731,6 +768,25 @@ fn (mut g JitCodegen) generate(expr Expr) !string {
 	g.buf.write_string('    if (_out_len < out_cap) out_json[_out_len] = 0;\n')
 	g.buf.write_string('    return _out_len;\n')
 	g.buf.write_string('}\n')
+
+	// Direct entry point — uses pre-built global ctx, no JSON
+	g.buf.write_string('\nint jit_eval_direct(void) {\n')
+	g.buf.write_string('    Val ctx = _g_ctx;\n')
+	g.buf.write_string('    Val _meta = _g_meta;\n')
+
+	// Re-generate the expression code for the direct path
+	mut g2 := new_jit_codegen()
+	// Copy declared vars so variable IDs don't collide with the first pass
+	g2.temp_id = g.temp_id
+	result2 := g2.gen_expr(expr)
+
+	g.buf.write_string(g2.buf.str())
+	g.buf.write_string('    (void)${result2};\n')
+	g.buf.write_string('    _g_ctx = ctx;\n')
+	g.buf.write_string('    _g_meta = _meta;\n')
+	g.buf.write_string('    return 0;\n')
+	g.buf.write_string('}\n')
+
 	return g.buf.str()
 }
 
