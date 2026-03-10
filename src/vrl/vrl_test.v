@@ -217,8 +217,8 @@ fn test_merge_objects() {
 
 fn test_flatten_object() {
 	mut obj := map[string]VrlValue{}
-	mut inner := map[string]VrlValue{}
-	inner['b'] = VrlValue(1)
+	mut inner := new_object_map()
+	inner.set('b', VrlValue(1))
 	obj['a'] = VrlValue(inner)
 	result := execute('flatten(.)', obj) or { panic(err) }
 	json_str := vrl_to_json(result)
@@ -264,8 +264,8 @@ fn test_modulo() {
 
 fn test_nested_path_set_get() {
 	mut obj := map[string]VrlValue{}
-	mut inner := map[string]VrlValue{}
-	inner['b'] = VrlValue(42)
+	mut inner := new_object_map()
+	inner.set('b', VrlValue(42))
 	obj['a'] = VrlValue(inner)
 	result := execute('.a.b', obj) or { panic(err) }
 	assert result == VrlValue(42)
