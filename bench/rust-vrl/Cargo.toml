@@ -1,0 +1,7 @@
+[package]
+name = "vrl-bench"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+vrl = { version = "0.22", features = ["compiler", "stdlib", "value"] }
