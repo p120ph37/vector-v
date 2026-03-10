@@ -4,20 +4,31 @@ import event
 import vrl
 
 // RemapTransform applies VRL programs to events.
+// The VRL source is compiled (lexed + parsed) once at initialization.
+// Only the AST-walking eval runs per-event.
 // Mirrors Vector's remap transform (src/transforms/remap.rs).
 pub struct RemapTransform {
-	source string // The VRL source code
+	source string   // The VRL source code
+	ast    vrl.Expr // Pre-compiled AST
 }
 
-// new_remap creates a new RemapTransform.
+// new_remap creates a new RemapTransform, compiling the VRL source once.
 pub fn new_remap(opts map[string]string) !RemapTransform {
 	source := opts['source'] or { return error('remap transform requires "source" option') }
+
+	// Compile VRL program once at initialization
+	mut lex := vrl.new_lexer(source)
+	tokens := lex.tokenize()
+	mut parser := vrl.new_parser(tokens)
+	ast := parser.parse()!
+
 	return RemapTransform{
 		source: source
+		ast: ast
 	}
 }
 
-// transform applies the VRL program to an event.
+// transform evaluates the pre-compiled VRL AST against an event.
 pub fn (t &RemapTransform) transform(e event.Event) ![]event.Event {
 	match e {
 		event.LogEvent {
@@ -27,15 +38,9 @@ pub fn (t &RemapTransform) transform(e event.Event) ![]event.Event {
 				vrl_obj[k] = event_value_to_vrl(v)
 			}
 
-			// Compile VRL program
-			mut lex := vrl.new_lexer(t.source)
-			tokens := lex.tokenize()
-			mut parser := vrl.new_parser(tokens)
-			ast := parser.parse()!
-
-			// Execute and get modified object
+			// Execute pre-compiled AST
 			mut rt := vrl.new_runtime_with_object(vrl_obj)
-			rt.eval(ast) or {
+			rt.eval(t.ast) or {
 				return error('VRL execution error: ${err}')
 			}
 
