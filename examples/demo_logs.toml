@@ -1,0 +1,13 @@
+# Demo logs -> stdout pipeline
+# Usage: vector-v -c config/demo_logs.toml
+
+[sources.demo]
+type = "demo_logs"
+format = "json"
+count = "5"
+interval = "0.5"
+
+[sinks.out]
+type = "console"
+inputs = ["demo"]
+encoding.codec = "text"

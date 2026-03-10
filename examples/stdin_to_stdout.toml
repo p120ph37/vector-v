@@ -1,0 +1,10 @@
+# Minimal stdin -> stdout pipeline
+# Usage: echo "hello world" | vector-v -c config/stdin_to_stdout.toml
+
+[sources.in]
+type = "stdin"
+
+[sinks.out]
+type = "console"
+inputs = ["in"]
+encoding.codec = "json"

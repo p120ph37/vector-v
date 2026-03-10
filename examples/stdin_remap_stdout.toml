@@ -1,0 +1,15 @@
+# stdin -> remap transform -> stdout pipeline
+# Usage: echo "hello world" | vector-v -c config/stdin_remap_stdout.toml
+
+[sources.in]
+type = "stdin"
+
+[transforms.parse]
+type = "remap"
+inputs = ["in"]
+source = ".environment = \"production\""
+
+[sinks.out]
+type = "console"
+inputs = ["parse"]
+encoding.codec = "json"
