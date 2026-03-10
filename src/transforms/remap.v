@@ -34,8 +34,8 @@ pub fn (t &RemapTransform) transform(e event.Event) ![]event.Event {
 		event.LogEvent {
 			// Convert event fields to VRL values
 			mut vrl_obj := map[string]vrl.VrlValue{}
-			for k, v in e.fields {
-				vrl_obj[k] = event_value_to_vrl(v)
+			for k, v_ in e.fields {
+				vrl_obj[k] = event_value_to_vrl(v_)
 			}
 
 			// Execute pre-compiled AST
@@ -77,9 +77,9 @@ fn event_value_to_vrl(v event.Value) vrl.VrlValue {
 			return vrl.VrlValue(items)
 		}
 		map[string]event.Value {
-			mut obj := map[string]vrl.VrlValue{}
+			mut obj := vrl.new_object_map()
 			for k, val in v {
-				obj[k] = event_value_to_vrl(val)
+				obj.set(k, event_value_to_vrl(val))
 			}
 			return vrl.VrlValue(obj)
 		}
@@ -103,10 +103,16 @@ fn vrl_value_to_event(v vrl.VrlValue) event.Value {
 			}
 			return event.Value(items)
 		}
-		map[string]vrl.VrlValue {
+		vrl.ObjectMap {
 			mut obj := map[string]event.Value{}
-			for k, val in v {
-				obj[k] = vrl_value_to_event(val)
+			if v.is_large {
+				for k, val in v.hm {
+					obj[k] = vrl_value_to_event(val)
+				}
+			} else {
+				for i in 0 .. v.ks.len {
+					obj[v.ks[i]] = vrl_value_to_event(v.vs[i])
+				}
 			}
 			return event.Value(obj)
 		}

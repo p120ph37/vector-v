@@ -10,7 +10,7 @@ pub type VrlValue = string
 	| f64
 	| bool
 	| []VrlValue
-	| map[string]VrlValue
+	| ObjectMap
 	| Timestamp
 	| VrlRegex
 	| VrlNull
@@ -57,7 +57,7 @@ pub fn vrl_to_string(v VrlValue) string {
 		[]VrlValue {
 			return vrl_to_json(VrlValue(v))
 		}
-		map[string]VrlValue {
+		ObjectMap {
 			return vrl_to_json(VrlValue(v))
 		}
 	}
@@ -104,13 +104,13 @@ pub fn vrl_to_json(v VrlValue) string {
 			}
 			return '[${parts.join(", ")}]'
 		}
-		map[string]VrlValue {
+		ObjectMap {
 			mut parts := []string{}
 			// Sort keys for deterministic output
-			mut keys := v.keys()
-			keys.sort()
-			for k in keys {
-				val := v[k] or { VrlValue(VrlNull{}) }
+			mut all_keys := v.keys()
+			all_keys.sort()
+			for k in all_keys {
+				val := v.get(k) or { VrlValue(VrlNull{}) }
 				parts << '"${k}": ${vrl_to_json(val)}'
 			}
 			return '{${parts.join(", ")}}'
@@ -178,19 +178,31 @@ pub fn values_equal(a VrlValue, b VrlValue) bool {
 				else { return false }
 			}
 		}
-		map[string]VrlValue {
+		ObjectMap {
 			match b {
-				map[string]VrlValue {
-					if a.len != b.len {
+				ObjectMap {
+					if a.len() != b.len() {
 						return false
 					}
-					for k, v in a {
-						if bv := b[k] {
-							if !values_equal(v, bv) {
+					if a.is_large {
+						for k, v in a.hm {
+							if bv := b.get(k) {
+								if !values_equal(v, bv) {
+									return false
+								}
+							} else {
 								return false
 							}
-						} else {
-							return false
+						}
+					} else {
+						for i in 0 .. a.ks.len {
+							if bv := b.get(a.ks[i]) {
+								if !values_equal(a.vs[i], bv) {
+									return false
+								}
+							} else {
+								return false
+							}
 						}
 					}
 					return true

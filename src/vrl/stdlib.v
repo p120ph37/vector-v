@@ -45,7 +45,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'is_boolean' { return VrlValue(a0 is bool) }
 			'is_null' { return VrlValue(a0 is VrlNull) }
 			'is_array' { return VrlValue(a0 is []VrlValue) }
-			'is_object' { return VrlValue(a0 is map[string]VrlValue) }
+			'is_object' { return VrlValue(a0 is ObjectMap) }
 			'is_nullish' { return fn_is_nullish([a0]) }
 			'encode_json' { return VrlValue(vrl_to_json(a0)) }
 			'decode_json', 'parse_json' { return fn_decode_json([a0]) }
@@ -227,7 +227,7 @@ fn fn_length(args []VrlValue) !VrlValue {
 	match a {
 		string { return VrlValue(a.len) }
 		[]VrlValue { return VrlValue(a.len) }
-		map[string]VrlValue { return VrlValue(a.len) }
+		ObjectMap { return VrlValue(a.len()) }
 		else { return error('length requires string, array, or object') }
 	}
 }
@@ -444,7 +444,7 @@ fn fn_is_type(args []VrlValue, type_name string) !VrlValue {
 		'boolean' { a is bool }
 		'null' { a is VrlNull }
 		'array' { a is []VrlValue }
-		'object' { a is map[string]VrlValue }
+		'object' { a is ObjectMap }
 		else { false }
 	}
 	return VrlValue(result)
@@ -463,17 +463,17 @@ fn fn_is_nullish(args []VrlValue) !VrlValue {
 fn fn_type_def(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('type_def requires 1 argument') }
 	a := args[0]
-	mut result := map[string]VrlValue{}
+	mut result := new_object_map()
 	match a {
-		string { result['bytes'] = VrlValue(true) }
-		int { result['integer'] = VrlValue(true) }
-		f64 { result['float'] = VrlValue(true) }
-		bool { result['boolean'] = VrlValue(true) }
-		VrlNull { result['null'] = VrlValue(true) }
-		[]VrlValue { result['array'] = VrlValue(true) }
-		map[string]VrlValue { result['object'] = VrlValue(true) }
-		Timestamp { result['timestamp'] = VrlValue(true) }
-		VrlRegex { result['regex'] = VrlValue(true) }
+		string { result.set('bytes', VrlValue(true)) }
+		int { result.set('integer', VrlValue(true)) }
+		f64 { result.set('float', VrlValue(true)) }
+		bool { result.set('boolean', VrlValue(true)) }
+		VrlNull { result.set('null', VrlValue(true)) }
+		[]VrlValue { result.set('array', VrlValue(true)) }
+		ObjectMap { result.set('object', VrlValue(true)) }
+		Timestamp { result.set('timestamp', VrlValue(true)) }
+		VrlRegex { result.set('regex', VrlValue(true)) }
 	}
 	return VrlValue(result)
 }
@@ -485,7 +485,7 @@ fn (mut rt Runtime) fn_del(expr FnCallExpr) !VrlValue {
 	match path_expr {
 		PathExpr {
 			if path_expr.path == '.' {
-				old := VrlValue(rt.object.to_map())
+				old := VrlValue(rt.object.clone_map())
 				rt.object.clear()
 				return old
 			}
@@ -499,9 +499,9 @@ fn (mut rt Runtime) fn_del(expr FnCallExpr) !VrlValue {
 				if top_val := rt.object.get(parts[0]) {
 					tv := top_val
 					match tv {
-						map[string]VrlValue {
-							val := tv[parts[1]] or { VrlValue(VrlNull{}) }
-							mut m := copy_map(tv)
+						ObjectMap {
+							val := tv.get(parts[1]) or { VrlValue(VrlNull{}) }
+							mut m := tv.clone_map()
 							m.delete(parts[1])
 							rt.object.set(parts[0], VrlValue(m))
 							return val
@@ -535,9 +535,10 @@ fn fn_keys(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('keys requires 1 argument') }
 	a := args[0]
 	match a {
-		map[string]VrlValue {
-			mut result := []VrlValue{}
-			for k, _ in a {
+		ObjectMap {
+			all_keys := a.keys()
+			mut result := []VrlValue{cap: all_keys.len}
+			for k in all_keys {
 				result << VrlValue(k)
 			}
 			return VrlValue(result)
@@ -550,12 +551,15 @@ fn fn_values(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('values requires 1 argument') }
 	a := args[0]
 	match a {
-		map[string]VrlValue {
-			mut result := []VrlValue{}
-			for _, v in a {
-				result << v
+		ObjectMap {
+			if a.is_large {
+				mut result := []VrlValue{}
+				for _, v in a.hm {
+					result << v
+				}
+				return VrlValue(result)
 			}
-			return VrlValue(result)
+			return VrlValue(a.vs.clone())
 		}
 		else { return error('values requires an object') }
 	}
@@ -565,8 +569,8 @@ fn fn_flatten(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('flatten requires 1 argument') }
 	a := args[0]
 	match a {
-		map[string]VrlValue {
-			mut result := map[string]VrlValue{}
+		ObjectMap {
+			mut result := new_object_map()
 			flatten_object(a, '', mut result)
 			return VrlValue(result)
 		}
@@ -579,16 +583,31 @@ fn fn_flatten(args []VrlValue) !VrlValue {
 	}
 }
 
-fn flatten_object(obj map[string]VrlValue, prefix string, mut result map[string]VrlValue) {
-	for k, v in obj {
-		full_key := if prefix.len > 0 { '${prefix}.${k}' } else { k }
-		val := v
-		match val {
-			map[string]VrlValue {
-				flatten_object(val, full_key, mut result)
+fn flatten_object(obj ObjectMap, prefix string, mut result ObjectMap) {
+	if obj.is_large {
+		for k, v in obj.hm {
+			full_key := if prefix.len > 0 { '${prefix}.${k}' } else { k }
+			val := v
+			match val {
+				ObjectMap {
+					flatten_object(val, full_key, mut result)
+				}
+				else {
+					result.set(full_key, v)
+				}
 			}
-			else {
-				result[full_key] = v
+		}
+	} else {
+		for i in 0 .. obj.ks.len {
+			full_key := if prefix.len > 0 { '${prefix}.${obj.ks[i]}' } else { obj.ks[i] }
+			val := obj.vs[i]
+			match val {
+				ObjectMap {
+					flatten_object(val, full_key, mut result)
+				}
+				else {
+					result.set(full_key, obj.vs[i])
+				}
 			}
 		}
 	}
@@ -612,23 +631,25 @@ fn fn_unflatten(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('unflatten requires 1 argument') }
 	a := args[0]
 	match a {
-		map[string]VrlValue {
-			mut result := map[string]VrlValue{}
-			for k, v in a {
+		ObjectMap {
+			mut result := new_object_map()
+			all_keys := a.keys()
+			for k in all_keys {
+				v := a.get(k) or { VrlValue(VrlNull{}) }
 				parts := k.split('.')
 				if parts.len == 1 {
-					result[k] = v
+					result.set(k, v)
 				} else {
-					if parts[0] !in result {
-						result[parts[0]] = VrlValue(map[string]VrlValue{})
+					if !result.has(parts[0]) {
+						result.set(parts[0], VrlValue(new_object_map()))
 					}
-					existing := result[parts[0]] or { VrlValue(map[string]VrlValue{}) }
+					existing := result.get(parts[0]) or { VrlValue(new_object_map()) }
 					e := existing
 					match e {
-						map[string]VrlValue {
-							mut m := copy_map(e)
-							m[parts[1..].join('.')] = v
-							result[parts[0]] = VrlValue(m)
+						ObjectMap {
+							mut m := e.clone_map()
+							m.set(parts[1..].join('.'), v)
+							result.set(parts[0], VrlValue(m))
 						}
 						else {}
 					}
@@ -645,12 +666,18 @@ fn fn_merge(args []VrlValue) !VrlValue {
 	a0 := args[0]
 	a1 := args[1]
 	match a0 {
-		map[string]VrlValue {
+		ObjectMap {
 			match a1 {
-				map[string]VrlValue {
-					mut result := copy_map(a0)
-					for k, v in a1 {
-						result[k] = v
+				ObjectMap {
+					mut result := a0.clone_map()
+					if a1.is_large {
+						for k, v in a1.hm {
+							result.set(k, v)
+						}
+					} else {
+						for i in 0 .. a1.ks.len {
+							result.set(a1.ks[i], a1.vs[i])
+						}
 					}
 					return VrlValue(result)
 				}
@@ -677,14 +704,25 @@ fn fn_compact(args []VrlValue) !VrlValue {
 			}
 			return VrlValue(result)
 		}
-		map[string]VrlValue {
-			mut result := map[string]VrlValue{}
-			for k, v in a {
-				val := v
-				match val {
-					VrlNull {}
-					string { if val.len > 0 { result[k] = v } }
-					else { result[k] = v }
+		ObjectMap {
+			mut result := new_object_map()
+			if a.is_large {
+				for k, v in a.hm {
+					val := v
+					match val {
+						VrlNull {}
+						string { if val.len > 0 { result.set(k, v) } }
+						else { result.set(k, v) }
+					}
+				}
+			} else {
+				for i in 0 .. a.ks.len {
+					val := a.vs[i]
+					match val {
+						VrlNull {}
+						string { if val.len > 0 { result.set(a.ks[i], a.vs[i]) } }
+						else { result.set(a.ks[i], a.vs[i]) }
+					}
 				}
 			}
 			return VrlValue(result)
@@ -846,9 +884,9 @@ fn parse_json_array(s string) !VrlValue {
 fn parse_json_object(s string) !VrlValue {
 	end := s.len - 1
 	inner := s[1..end].trim_space()
-	if inner.len == 0 { return VrlValue(map[string]VrlValue{}) }
+	if inner.len == 0 { return VrlValue(new_object_map()) }
 	parts := split_json_top_level(inner)
-	mut result := map[string]VrlValue{}
+	mut result := new_object_map()
 	for part in parts {
 		colon_idx := find_colon(part)
 		if colon_idx > 0 {
@@ -860,7 +898,7 @@ fn parse_json_object(s string) !VrlValue {
 				key = key_str[1..kend]
 			}
 			val := parse_json_recursive(val_str)!
-			result[key] = val
+			result.set(key, val)
 		}
 	}
 	return VrlValue(result)
@@ -1022,7 +1060,7 @@ fn fn_ensure_object(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('object requires 1 argument') }
 	a := args[0]
 	match a {
-		map[string]VrlValue { return VrlValue(a) }
-		else { return VrlValue(map[string]VrlValue{}) }
+		ObjectMap { return VrlValue(a) }
+		else { return VrlValue(new_object_map()) }
 	}
 }
