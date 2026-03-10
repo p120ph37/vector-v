@@ -84,7 +84,7 @@ pub fn (om &ObjectMap) to_map() map[string]VrlValue {
 pub fn (om &ObjectMap) get(key string) ?VrlValue {
 	if om.is_large {
 		if key in om.hm {
-			return om.hm[key]
+			return om.hm[key] or { return none }
 		}
 		return none
 	}
@@ -138,7 +138,7 @@ pub fn (mut om ObjectMap) set(key string, val VrlValue) {
 pub fn (mut om ObjectMap) delete(key string) VrlValue {
 	if om.is_large {
 		if key in om.hm {
-			val := om.hm[key]
+			val := om.hm[key] or { VrlValue(VrlNull{}) }
 			om.hm.delete(key)
 			return val
 		}

@@ -1,20 +1,21 @@
 module main
 
 import os
-import cli
+import cliargs
+import api
 import conf
 import topology
 
 fn main() {
-	args := cli.parse_args()
+	args := cliargs.parse_args()
 
 	if args.help {
-		cli.print_help()
+		cliargs.print_help()
 		return
 	}
 
 	if args.version {
-		cli.print_version()
+		cliargs.print_version()
 		return
 	}
 
@@ -54,6 +55,25 @@ fn main() {
 
 	if args.verbose {
 		eprintln('info: starting pipeline with ${pipeline_cfg.sources.len} source(s), ${pipeline_cfg.transforms.len} transform(s), ${pipeline_cfg.sinks.len} sink(s)')
+	}
+
+	// Start API server if configured
+	// Check if any source has api.enabled = true or if there's an api section
+	mut api_enabled := false
+	mut api_address := '0.0.0.0:8686'
+	for _, comp in pipeline_cfg.sources {
+		if ae := comp.options['api.enabled'] {
+			if ae == 'true' {
+				api_enabled = true
+			}
+		}
+		if aa := comp.options['api.address'] {
+			api_address = aa
+		}
+	}
+
+	if api_enabled {
+		spawn api.run_server(api_address)
 	}
 
 	pipeline := topology.new(pipeline_cfg)

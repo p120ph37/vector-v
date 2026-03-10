@@ -3,7 +3,7 @@ module transforms
 import event
 
 // Transform is a tagged union of all transform types.
-pub type Transform = RemapTransform | FilterTransform | ReduceTransform
+pub type Transform = RemapTransform | FilterTransform | ReduceTransform | Ec2MetadataTransform
 
 // build_transform creates a Transform from a type name and config options.
 pub fn build_transform(typ string, opts map[string]string) !Transform {
@@ -16,6 +16,9 @@ pub fn build_transform(typ string, opts map[string]string) !Transform {
 		}
 		'reduce' {
 			return Transform(new_reduce(opts)!)
+		}
+		'aws_ec2_metadata' {
+			return Transform(new_ec2_metadata(opts)!)
 		}
 		else {
 			return error('unknown transform type: "${typ}"')
@@ -33,6 +36,9 @@ pub fn apply_transform(mut t Transform, e event.Event) ![]event.Event {
 			return t.transform(e)
 		}
 		ReduceTransform {
+			return t.transform(e)
+		}
+		Ec2MetadataTransform {
 			return t.transform(e)
 		}
 	}
