@@ -485,26 +485,25 @@ fn (mut rt Runtime) fn_del(expr FnCallExpr) !VrlValue {
 	match path_expr {
 		PathExpr {
 			if path_expr.path == '.' {
-				old := VrlValue(copy_map(rt.object))
+				old := VrlValue(rt.object.to_map())
 				rt.object.clear()
 				return old
 			}
 			clean := if path_expr.path.starts_with('.') { path_expr.path[1..] } else { path_expr.path }
 			parts := clean.split('.')
 			if parts.len == 1 {
-				val := rt.object[parts[0]] or { VrlValue(VrlNull{}) }
-				rt.object.delete(parts[0])
+				val := rt.object.delete(parts[0])
 				return val
 			}
 			if parts.len == 2 {
-				if top_val := rt.object[parts[0]] {
+				if top_val := rt.object.get(parts[0]) {
 					tv := top_val
 					match tv {
 						map[string]VrlValue {
 							val := tv[parts[1]] or { VrlValue(VrlNull{}) }
 							mut m := copy_map(tv)
 							m.delete(parts[1])
-							rt.object[parts[0]] = VrlValue(m)
+							rt.object.set(parts[0], VrlValue(m))
 							return val
 						}
 						else {}
@@ -526,7 +525,7 @@ fn (mut rt Runtime) fn_exists(expr FnCallExpr) !VrlValue {
 		PathExpr {
 			if path_expr.path == '.' { return VrlValue(true) }
 			clean := if path_expr.path.starts_with('.') { path_expr.path[1..] } else { path_expr.path }
-			return VrlValue(clean in rt.object)
+			return VrlValue(rt.object.has(clean))
 		}
 		else { return VrlValue(false) }
 	}
@@ -743,10 +742,10 @@ fn (mut rt Runtime) fn_filter(expr FnCallExpr) !VrlValue {
 				mut result := []VrlValue{}
 				for i, item in c {
 					if closure_expr.params.len > 0 {
-						rt.vars[closure_expr.params[0].trim_left('_')] = VrlValue(i)
+						rt.vars.set(closure_expr.params[0].trim_left('_'), VrlValue(i))
 					}
 					if closure_expr.params.len > 1 {
-						rt.vars[closure_expr.params[1]] = item
+						rt.vars.set(closure_expr.params[1], item)
 					}
 					cond := rt.eval(closure_expr.body[0])!
 					if is_truthy(cond) { result << item }
@@ -770,10 +769,10 @@ fn (mut rt Runtime) fn_for_each(expr FnCallExpr) !VrlValue {
 			[]VrlValue {
 				for i, item in c {
 					if closure_expr.params.len > 0 {
-						rt.vars[closure_expr.params[0].trim_left('_')] = VrlValue(i)
+						rt.vars.set(closure_expr.params[0].trim_left('_'), VrlValue(i))
 					}
 					if closure_expr.params.len > 1 {
-						rt.vars[closure_expr.params[1]] = item
+						rt.vars.set(closure_expr.params[1], item)
 					}
 					rt.eval(closure_expr.body[0])!
 				}
