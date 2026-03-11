@@ -39,6 +39,7 @@ mut:
 	metadata ObjectMap // Metadata (%)
 	vars     ObjectMap // Local variables
 	aborted  bool
+	returned bool
 	abort_msg string
 }
 
@@ -145,6 +146,13 @@ pub fn (mut rt Runtime) eval(expr Expr) !VrlValue {
 				msg_val := rt.eval(expr.message[0])!
 				rt.abort_msg = vrl_to_string(msg_val)
 			}
+			return VrlValue(rt.object.clone_map())
+		}
+		ReturnExpr {
+			rt.returned = true
+			if expr.value.len > 0 {
+				return rt.eval(expr.value[0])
+			}
 			return VrlValue(VrlNull{})
 		}
 		ClosureExpr {
@@ -186,7 +194,7 @@ fn (mut rt Runtime) eval_block(expr BlockExpr) !VrlValue {
 	mut result := VrlValue(VrlNull{})
 	for e in expr.exprs {
 		result = rt.eval(e)!
-		if rt.aborted {
+		if rt.aborted || rt.returned {
 			return result
 		}
 	}
@@ -214,11 +222,17 @@ fn (mut rt Runtime) eval_binary(expr BinaryExpr) !VrlValue {
 		}
 		return rt.eval(expr.right[0])
 	}
+	if op0 == `|` && expr.op.len == 1 {
+		// | — object merge
+		left := rt.eval(expr.left[0])!
+		right := rt.eval(expr.right[0])!
+		return fn_merge([left, right])
+	}
 	if op0 == `&` && expr.op.len == 2 {
-		// &&
+		// && — VRL returns boolean false when left is not truthy
 		left := rt.eval(expr.left[0])!
 		if !is_truthy(left) {
-			return left
+			return VrlValue(false)
 		}
 		return rt.eval(expr.right[0])
 	}
@@ -353,7 +367,91 @@ fn (mut rt Runtime) assign_to(target Expr, val VrlValue) {
 			clean := if target.path.starts_with('%') { target.path[1..] } else { target.path }
 			rt.metadata.set(clean, val)
 		}
+		IndexExpr {
+			// Handle foo.bar = val, foo[0] = val, .path[idx] = val
+			rt.assign_index(target, val)
+		}
 		else {}
+	}
+}
+
+fn (mut rt Runtime) assign_index(target IndexExpr, val VrlValue) {
+	// Resolve the chain of IndexExpr to find the root variable and path
+	container_expr := target.expr[0]
+	index_expr := target.index[0]
+	// Get the index key
+	idx_val := rt.eval(index_expr) or { return }
+
+	// If container is an ident (local variable), get-or-create an object/array
+	if container_expr is IdentExpr {
+		name := container_expr.name
+		existing := rt.vars.get(name) or { VrlValue(new_object_map()) }
+		new_val := set_in_container(existing, idx_val, val)
+		rt.vars.set(name, new_val)
+		return
+	}
+	// If container is a path, similar logic
+	if container_expr is PathExpr {
+		existing := rt.get_path(container_expr.path) or { VrlValue(new_object_map()) }
+		new_val := set_in_container(existing, idx_val, val)
+		rt.assign_to(container_expr, new_val)
+		return
+	}
+	// Nested IndexExpr — need recursive handling
+	if container_expr is IndexExpr {
+		// Get existing container value
+		container_val := rt.eval(container_expr) or { VrlValue(new_object_map()) }
+		new_val := set_in_container(container_val, idx_val, val)
+		rt.assign_index(container_expr, new_val)
+		return
+	}
+}
+
+fn set_in_container(container VrlValue, key VrlValue, val VrlValue) VrlValue {
+	k := key
+	c := container
+	match k {
+		string {
+			// Object key access
+			match c {
+				ObjectMap {
+					mut m := c.clone_map()
+					m.set(k, val)
+					return VrlValue(m)
+				}
+				else {
+					mut m := new_object_map()
+					m.set(k, val)
+					return VrlValue(m)
+				}
+			}
+		}
+		int {
+			// Array index access
+			match c {
+				[]VrlValue {
+					mut arr := c.clone()
+					mut idx := if k < 0 { arr.len + k } else { k }
+					if idx < 0 { idx = 0 }
+					// Extend array if needed
+					for idx >= arr.len {
+						arr << VrlValue(VrlNull{})
+					}
+					arr[idx] = val
+					return VrlValue(arr)
+				}
+				else {
+					mut arr := []VrlValue{}
+					idx := if k < 0 { 0 } else { k }
+					for _ in 0 .. idx {
+						arr << VrlValue(VrlNull{})
+					}
+					arr << val
+					return VrlValue(arr)
+				}
+			}
+		}
+		else { return container }
 	}
 }
 
@@ -425,7 +523,31 @@ fn (mut rt Runtime) merge_assign(target Expr, val VrlValue) {
 				}
 				else {}
 			}
+		} else {
+			// Non-root path: merge val into existing object at path
+			existing := rt.get_path(target.path) or { VrlValue(new_object_map()) }
+			merged := fn_merge([existing, val]) or { return }
+			rt.assign_to(target, merged)
 		}
+	} else if target is IdentExpr {
+		existing := rt.vars.get(target.name) or { VrlValue(new_object_map()) }
+		merged := fn_merge([existing, val]) or { return }
+		rt.vars.set(target.name, merged)
+	}
+}
+
+// vrl_type_name returns the VRL type name for error messages.
+fn vrl_type_name(v VrlValue) string {
+	match v {
+		string { return 'string' }
+		int { return 'integer' }
+		f64 { return 'float' }
+		bool { return 'boolean' }
+		VrlNull { return 'null' }
+		[]VrlValue { return 'array' }
+		ObjectMap { return 'object' }
+		Timestamp { return 'timestamp' }
+		VrlRegex { return 'regex' }
 	}
 }
 
@@ -456,7 +578,20 @@ fn arith_add(left VrlValue, right VrlValue) !VrlValue {
 		}
 		else {}
 	}
-	return error("can't add these types")
+	// String + null = string, null + string = string (VRL coerces null to "")
+	if l is string && r is VrlNull {
+		return VrlValue(l as string)
+	}
+	if l is VrlNull && r is string {
+		return VrlValue(r as string)
+	}
+	lt := vrl_type_name(left)
+	rt_ := vrl_type_name(right)
+	return error("can't add type ${rt_} to ${lt}")
+}
+
+fn is_nan(f f64) bool {
+	return f != f
 }
 
 fn arith_sub(left VrlValue, right VrlValue) !VrlValue {
@@ -466,20 +601,34 @@ fn arith_sub(left VrlValue, right VrlValue) !VrlValue {
 		int {
 			match r {
 				int { return VrlValue(l - r) }
-				f64 { return VrlValue(f64(l) - r) }
+				f64 {
+					result := f64(l) - r
+					if is_nan(result) { return error("can't subtract type float from float") }
+					return VrlValue(result)
+				}
 				else {}
 			}
 		}
 		f64 {
 			match r {
-				int { return VrlValue(l - f64(r)) }
-				f64 { return VrlValue(l - r) }
+				int {
+					result := l - f64(r)
+					if is_nan(result) { return error("can't subtract type float from float") }
+					return VrlValue(result)
+				}
+				f64 {
+					result := l - r
+					if is_nan(result) { return error("can't subtract type float from float") }
+					return VrlValue(result)
+				}
 				else {}
 			}
 		}
 		else {}
 	}
-	return error("can't subtract these types")
+	lt := vrl_type_name(left)
+	rt_ := vrl_type_name(right)
+	return error("can't subtract type ${rt_} from ${lt}")
 }
 
 fn arith_mul(left VrlValue, right VrlValue) !VrlValue {
@@ -502,40 +651,52 @@ fn arith_mul(left VrlValue, right VrlValue) !VrlValue {
 		}
 		else {}
 	}
+	// String * int = repeat string
+	if l is string && r is int {
+		s := l as string
+		n := r as int
+		if n <= 0 { return VrlValue('') }
+		mut result := ''
+		for _ in 0 .. n { result += s }
+		return VrlValue(result)
+	}
+	if l is int && r is string {
+		s := r as string
+		n := l as int
+		if n <= 0 { return VrlValue('') }
+		mut result := ''
+		for _ in 0 .. n { result += s }
+		return VrlValue(result)
+	}
 	return error("can't multiply these types")
 }
 
 fn arith_div(left VrlValue, right VrlValue) !VrlValue {
-	l := left
-	r := right
-	match l {
-		int {
-			match r {
-				int {
-					if r == 0 { return error('division by zero') }
-					return VrlValue(l / r)
-				}
-				f64 {
-					if r == 0.0 { return error('division by zero') }
-					return VrlValue(f64(l) / r)
-				}
-				else {}
-			}
+	if left is int {
+		if right is int {
+			divisor := right as int
+			if divisor == 0 { return error("can't divide by zero") }
+			dividend := left as int
+			// VRL integer division produces float
+			return VrlValue(f64(dividend) / f64(divisor))
 		}
-		f64 {
-			match r {
-				int {
-					if r == 0 { return error('division by zero') }
-					return VrlValue(l / f64(r))
-				}
-				f64 {
-					if r == 0.0 { return error('division by zero') }
-					return VrlValue(l / r)
-				}
-				else {}
-			}
+		if right is f64 {
+			r := right as f64
+			if r == 0.0 { return error("can't divide by zero") }
+			return VrlValue(f64(left as int) / r)
 		}
-		else {}
+	}
+	if left is f64 {
+		if right is int {
+			divisor := right as int
+			if divisor == 0 { return error("can't divide by zero") }
+			return VrlValue((left as f64) / f64(divisor))
+		}
+		if right is f64 {
+			r := right as f64
+			if r == 0.0 { return error("can't divide by zero") }
+			return VrlValue((left as f64) / r)
+		}
 	}
 	return error("can't divide these types")
 }
@@ -547,8 +708,37 @@ fn arith_mod(left VrlValue, right VrlValue) !VrlValue {
 		int {
 			match r {
 				int {
-					if r == 0 { return error('modulo by zero') }
-					return VrlValue(l % r)
+					ri := int(r)
+					if ri == 0 { return error("can't calculate remainder with divisor of zero") }
+					li := int(l)
+					// INT_MIN % -1 is UB in C, guard against SIGFPE
+					if ri == -1 { return VrlValue(0) }
+					v := li % ri
+					return VrlValue(v)
+				}
+				f64 {
+					rf := f64(r)
+					if rf == 0.0 { return error("can't calculate remainder with divisor of zero") }
+					lf := f64(int(l))
+					return VrlValue(lf - rf * f64(int(lf / rf)))
+				}
+				else {}
+			}
+		}
+		f64 {
+			match r {
+				int {
+					ri := int(r)
+					if ri == 0 { return error("can't calculate remainder with divisor of zero") }
+					lf := f64(l)
+					rf := f64(ri)
+					return VrlValue(lf - rf * f64(int(lf / rf)))
+				}
+				f64 {
+					rf := f64(r)
+					if rf == 0.0 { return error("can't calculate remainder with divisor of zero") }
+					lf := f64(l)
+					return VrlValue(lf - rf * f64(int(lf / rf)))
 				}
 				else {}
 			}
@@ -596,6 +786,12 @@ fn compare_values_lt(left VrlValue, right VrlValue) !VrlValue {
 				else {}
 			}
 		}
+		Timestamp {
+			match r {
+				Timestamp { return VrlValue(l.t.unix() < r.t.unix()) }
+				else {}
+			}
+		}
 		else {}
 	}
 	return error("can't compare these types")
@@ -622,6 +818,12 @@ fn compare_values_gt(left VrlValue, right VrlValue) !VrlValue {
 		string {
 			match r {
 				string { return VrlValue(l > r) }
+				else {}
+			}
+		}
+		Timestamp {
+			match r {
+				Timestamp { return VrlValue(l.t.unix() > r.t.unix()) }
 				else {}
 			}
 		}
@@ -654,6 +856,12 @@ fn compare_values_le(left VrlValue, right VrlValue) !VrlValue {
 				else {}
 			}
 		}
+		Timestamp {
+			match r {
+				Timestamp { return VrlValue(l.t.unix() <= r.t.unix()) }
+				else {}
+			}
+		}
 		else {}
 	}
 	return error("can't compare these types")
@@ -680,6 +888,12 @@ fn compare_values_ge(left VrlValue, right VrlValue) !VrlValue {
 		string {
 			match r {
 				string { return VrlValue(l >= r) }
+				else {}
+			}
+		}
+		Timestamp {
+			match r {
+				Timestamp { return VrlValue(l.t.unix() >= r.t.unix()) }
 				else {}
 			}
 		}

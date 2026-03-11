@@ -1,5 +1,7 @@
 module vrl
 
+import time
+
 // Parser turns a token stream into an AST.
 pub struct Parser {
 	tokens []Token
@@ -44,6 +46,7 @@ fn (mut p Parser) parse_assignment() !Expr {
 
 	if p.current().kind == .assign {
 		p.advance()
+		p.skip_newlines()
 		right := p.parse_assignment()!
 		return Expr(AssignExpr{
 			target: [left]
@@ -68,6 +71,7 @@ fn (mut p Parser) parse_coalesce() !Expr {
 
 	for p.current().kind == .question2 {
 		p.advance()
+		p.skip_newlines()
 		right := p.parse_or()!
 		left = Expr(CoalesceExpr{
 			expr: [left]
@@ -81,14 +85,27 @@ fn (mut p Parser) parse_coalesce() !Expr {
 fn (mut p Parser) parse_or() !Expr {
 	mut left := p.parse_and()!
 
-	for p.current().kind == .or {
-		p.advance()
-		right := p.parse_and()!
-		left = Expr(BinaryExpr{
-			op: '||'
-			left: [left]
-			right: [right]
-		})
+	for p.current().kind == .or || p.current().kind == .pipe {
+		if p.current().kind == .pipe {
+			// Single | is object merge
+			p.advance()
+			p.skip_newlines()
+			right := p.parse_and()!
+			left = Expr(BinaryExpr{
+				op: '|'
+				left: [left]
+				right: [right]
+			})
+		} else {
+			p.advance()
+			p.skip_newlines()
+			right := p.parse_and()!
+			left = Expr(BinaryExpr{
+				op: '||'
+				left: [left]
+				right: [right]
+			})
+		}
 	}
 
 	return left
@@ -99,6 +116,7 @@ fn (mut p Parser) parse_and() !Expr {
 
 	for p.current().kind == .and {
 		p.advance()
+		p.skip_newlines()
 		right := p.parse_equality()!
 		left = Expr(BinaryExpr{
 			op: '&&'
@@ -116,6 +134,7 @@ fn (mut p Parser) parse_equality() !Expr {
 	for p.current().kind in [.eq, .neq] {
 		op := p.current().lit
 		p.advance()
+		p.skip_newlines()
 		right := p.parse_comparison()!
 		left = Expr(BinaryExpr{
 			op: op
@@ -133,6 +152,7 @@ fn (mut p Parser) parse_comparison() !Expr {
 	for p.current().kind in [.lt, .gt, .le, .ge] {
 		op := p.current().lit
 		p.advance()
+		p.skip_newlines()
 		right := p.parse_addition()!
 		left = Expr(BinaryExpr{
 			op: op
@@ -150,6 +170,7 @@ fn (mut p Parser) parse_addition() !Expr {
 	for p.current().kind in [.plus, .minus] {
 		op := p.current().lit
 		p.advance()
+		p.skip_newlines()
 		right := p.parse_multiplication()!
 		left = Expr(BinaryExpr{
 			op: op
@@ -167,6 +188,7 @@ fn (mut p Parser) parse_multiplication() !Expr {
 	for p.current().kind in [.star, .slash, .percent] {
 		op := p.current().lit
 		p.advance()
+		p.skip_newlines()
 		right := p.parse_unary()!
 		left = Expr(BinaryExpr{
 			op: op
@@ -195,17 +217,47 @@ fn (mut p Parser) parse_unary() !Expr {
 fn (mut p Parser) parse_postfix() !Expr {
 	mut expr := p.parse_primary()!
 
-	// Handle postfix indexing: expr[index]
-	for p.current().kind == .lbracket {
-		p.advance()
-		index := p.parse_expr()!
-		if p.current().kind == .rbracket {
+	for {
+		// Handle postfix indexing: expr[index]
+		if p.current().kind == .lbracket {
 			p.advance()
+			index := p.parse_expr()!
+			if p.current().kind == .rbracket {
+				p.advance()
+			}
+			expr = Expr(IndexExpr{
+				expr: [expr]
+				index: [index]
+			})
+			continue
 		}
-		expr = Expr(IndexExpr{
-			expr: [expr]
-			index: [index]
-		})
+		// Handle postfix property access: expr.ident
+		if p.current().kind == .dot_ident {
+			path := p.current().lit // e.g. ".foo" or ".foo.bar"
+			p.advance()
+			// Extract the property name(s) from the dot_ident
+			clean := if path.starts_with('.') { path[1..] } else { path }
+			parts := clean.split('.')
+			for part in parts {
+				expr = Expr(IndexExpr{
+					expr: [expr]
+					index: [Expr(LiteralExpr{value: VrlValue(part)})]
+				})
+			}
+			continue
+		}
+		if p.current().kind == .dot && p.pos + 1 < p.tokens.len
+			&& p.tokens[p.pos + 1].kind == .ident {
+			p.advance() // skip .
+			prop := p.current().lit
+			p.advance()
+			expr = Expr(IndexExpr{
+				expr: [expr]
+				index: [Expr(LiteralExpr{value: VrlValue(prop)})]
+			})
+			continue
+		}
+		break
 	}
 
 	return expr
@@ -227,13 +279,18 @@ fn (mut p Parser) parse_primary() !Expr {
 			p.advance()
 			return Expr(LiteralExpr{value: VrlValue(tok.lit)})
 		}
+		.template_lit {
+			p.advance()
+			return p.parse_template(tok.lit)
+		}
 		.regex_lit {
 			p.advance()
 			return Expr(LiteralExpr{value: VrlValue(VrlRegex{pattern: tok.lit})})
 		}
 		.timestamp_lit {
 			p.advance()
-			return Expr(LiteralExpr{value: VrlValue(Timestamp{})})
+			ts := parse_timestamp_lit(tok.lit)
+			return Expr(LiteralExpr{value: VrlValue(ts)})
 		}
 		.true_lit {
 			p.advance()
@@ -267,17 +324,63 @@ fn (mut p Parser) parse_primary() !Expr {
 		}
 		.lparen {
 			p.advance()
-			expr := p.parse_expr()!
+			p.skip_newlines()
+			mut exprs := []Expr{}
+			for p.current().kind != .rparen && p.current().kind != .eof {
+				expr := p.parse_expr()!
+				exprs << expr
+				p.skip_newlines()
+				if p.current().kind == .semicolon {
+					p.advance()
+					p.skip_newlines()
+				}
+			}
 			if p.current().kind == .rparen {
 				p.advance()
 			}
-			return expr
+			if exprs.len == 0 {
+				return Expr(LiteralExpr{value: VrlValue(VrlNull{})})
+			}
+			if exprs.len == 1 {
+				return exprs[0]
+			}
+			return Expr(BlockExpr{exprs: exprs})
 		}
 		.lbracket {
 			return p.parse_array()
 		}
 		.lbrace {
-			return p.parse_object()
+			// Distinguish between object literal and block expression.
+			// Object: { } or { string/ident : ... }
+			// Block: anything else (e.g. { 5 }, { foo = 1; ... })
+			// Skip newlines when peeking ahead
+			mut peek := p.pos + 1
+			for peek < p.tokens.len && (p.tokens[peek].kind == .newline || p.tokens[peek].kind == .semicolon) {
+				peek++
+			}
+			next := if peek < p.tokens.len { p.tokens[peek] } else { Token{kind: .eof} }
+			if next.kind == .rbrace {
+				// Empty object {}
+				return p.parse_object()
+			}
+			if next.kind == .string_lit || next.kind == .raw_string {
+				peek2 := peek + 1
+				after := if peek2 < p.tokens.len { p.tokens[peek2] } else { Token{kind: .eof} }
+				if after.kind == .colon {
+					return p.parse_object()
+				}
+				return p.parse_block()
+			}
+			if next.kind == .ident {
+				peek2 := peek + 1
+				after := if peek2 < p.tokens.len { p.tokens[peek2] } else { Token{kind: .eof} }
+				if after.kind == .colon {
+					return p.parse_object()
+				}
+				return p.parse_block()
+			}
+			// Default to block for everything else
+			return p.parse_block()
 		}
 		.minus {
 			p.advance()
@@ -308,12 +411,22 @@ fn (mut p Parser) parse_ident_or_call() !Expr {
 		return Expr(AbortExpr{})
 	}
 
+	if name == 'return' {
+		if p.current().kind != .eof && p.current().kind != .newline
+			&& p.current().kind != .rbrace {
+			val := p.parse_expr()!
+			return Expr(ReturnExpr{value: [val]})
+		}
+		return Expr(ReturnExpr{})
+	}
+
 	if p.current().kind == .lparen {
 		return p.parse_fn_call(name)
 	}
 
 	if p.current().kind == .assign {
 		p.advance()
+		p.skip_newlines()
 		val := p.parse_expr()!
 		return Expr(AssignExpr{
 			target: [Expr(IdentExpr{name: name})]
@@ -431,6 +544,11 @@ fn (mut p Parser) parse_if() !Expr {
 	condition := p.parse_expr()!
 	p.skip_newlines()
 	then_block := p.parse_block()!
+
+	// Peek ahead past newlines/semicolons to check for 'else', but only
+	// consume them if 'else' actually follows. This prevents eating
+	// statement separators that belong to the enclosing scope.
+	saved_pos := p.pos
 	p.skip_newlines()
 
 	if p.current().kind == .ident && p.current().lit == 'else' {
@@ -453,6 +571,8 @@ fn (mut p Parser) parse_if() !Expr {
 		})
 	}
 
+	// No 'else' found — restore position so the separator is not consumed
+	p.pos = saved_pos
 	return Expr(IfExpr{
 		condition: [condition]
 		then_block: [then_block]
@@ -532,4 +652,69 @@ fn (mut p Parser) skip_newlines() {
 	for p.current().kind == .newline || p.current().kind == .semicolon {
 		p.advance()
 	}
+}
+
+// parse_template parses a template string like "hello {{ expr }} world"
+// into a chain of string concatenations.
+fn (mut p Parser) parse_template(s string) !Expr {
+	mut parts := []Expr{}
+	mut remaining := s
+	for remaining.len > 0 {
+		idx := remaining.index('{{') or {
+			// No more templates, rest is literal string
+			parts << Expr(LiteralExpr{value: VrlValue(remaining)})
+			break
+		}
+		// Add the literal part before {{
+		if idx > 0 {
+			parts << Expr(LiteralExpr{value: VrlValue(remaining[..idx])})
+		}
+		// Find the closing }}
+		after := remaining[idx + 2..]
+		end_idx := after.index('}}') or {
+			// No closing }}, treat rest as literal
+			parts << Expr(LiteralExpr{value: VrlValue(remaining[idx..])})
+			break
+		}
+		// Parse the expression between {{ and }}
+		expr_str := after[..end_idx].trim_space()
+		mut sub_lex := new_lexer(expr_str)
+		sub_tokens := sub_lex.tokenize()
+		mut sub_parser := new_parser(sub_tokens)
+		expr := sub_parser.parse()!
+		// Wrap in to_string call so the expression result is coerced to string
+		parts << Expr(FnCallExpr{
+			name: 'to_string'
+			args: [expr]
+		})
+		remaining = after[end_idx + 2..]
+	}
+	if parts.len == 0 {
+		return Expr(LiteralExpr{value: VrlValue('')})
+	}
+	if parts.len == 1 {
+		return parts[0]
+	}
+	// Chain all parts with + (string concatenation)
+	mut result := parts[0]
+	for i in 1 .. parts.len {
+		result = Expr(BinaryExpr{
+			op: '+'
+			left: [result]
+			right: [parts[i]]
+		})
+	}
+	return result
+}
+
+// parse_timestamp_lit parses an RFC3339 timestamp string like "2021-02-02T19:41:00Z"
+fn parse_timestamp_lit(s string) Timestamp {
+	// Try RFC3339 format: 2021-02-02T19:41:00Z or with offset
+	t := time.parse_rfc3339(s) or {
+		// Try other common formats
+		time.parse(s) or {
+			return Timestamp{}
+		}
+	}
+	return Timestamp{t: t}
 }

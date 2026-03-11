@@ -19,6 +19,7 @@ pub type Expr = LiteralExpr
 	| IndexExpr
 	| CoalesceExpr
 	| AbortExpr
+	| ReturnExpr
 	| NotExpr
 	| ClosureExpr
 
@@ -119,6 +120,11 @@ pub:
 pub struct AbortExpr {
 pub:
 	message []Expr // empty = no message
+}
+
+pub struct ReturnExpr {
+pub:
+	value []Expr // the expression to return
 }
 
 pub struct NotExpr {

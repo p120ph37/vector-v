@@ -249,7 +249,7 @@ fn test_multiplication() {
 
 fn test_division() {
 	result := execute('10 / 2', map[string]VrlValue{}) or { panic(err) }
-	assert result == VrlValue(5)
+	assert result == VrlValue(5.0)
 }
 
 fn test_subtraction() {
