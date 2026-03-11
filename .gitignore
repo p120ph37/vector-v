@@ -14,3 +14,6 @@ bench/rust-vrl/Cargo.lock
 # V bench binaries
 bench/v-vrl/bench
 bench/v-vrl/bench_*
+src/vrl/conformance_test
+src/vrl/vrl.so
+*.so
