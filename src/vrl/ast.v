@@ -100,9 +100,10 @@ pub:
 
 pub struct FnCallExpr {
 pub:
-	name    string
-	args    []Expr
-	closure []Expr // empty or single ClosureExpr
+	name      string
+	args      []Expr
+	arg_names []string // parallel to args: empty string for positional, name for named
+	closure   []Expr   // empty or single ClosureExpr
 }
 
 pub struct IndexExpr {

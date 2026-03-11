@@ -77,7 +77,41 @@ fn format_float(f f64) string {
 		return '${i64(f)}.0'
 	}
 	s := '${f}'
+	// If V uses scientific notation, convert to decimal
+	if s.contains('e') || s.contains('E') {
+		return float_to_decimal(s, f)
+	}
 	return s
+}
+
+// float_to_decimal converts scientific notation string to decimal form.
+fn float_to_decimal(s string, f f64) string {
+	e_idx := s.index_any('eE')
+	if e_idx < 0 { return s }
+	mantissa := s[..e_idx]
+	exp := s[e_idx + 1..].int()
+	is_neg := f < 0
+
+	mut digits := mantissa.replace('.', '').replace('-', '')
+	dot_idx := mantissa.index('.') or { -1 }
+	mut dec_pos := if dot_idx >= 0 {
+		if is_neg { dot_idx - 1 } else { dot_idx }
+	} else {
+		digits.len
+	}
+	dec_pos += exp
+
+	if dec_pos >= digits.len {
+		for digits.len < dec_pos { digits += '0' }
+		result := '${digits}.0'
+		return if is_neg { '-${result}' } else { result }
+	}
+	if dec_pos <= 0 {
+		result := '0.${"0".repeat(-dec_pos)}${digits}'
+		return if is_neg { '-${result}' } else { result }
+	}
+	result := '${digits[..dec_pos]}.${digits[dec_pos..]}'
+	return if is_neg { '-${result}' } else { result }
 }
 
 // vrl_to_json converts a VrlValue to its JSON representation.
@@ -110,7 +144,7 @@ pub fn vrl_to_json(v VrlValue) string {
 			for item in v {
 				parts << vrl_to_json(item)
 			}
-			return '[${parts.join(", ")}]'
+			return '[${parts.join(",")}]'
 		}
 		ObjectMap {
 			mut parts := []string{}
@@ -119,9 +153,46 @@ pub fn vrl_to_json(v VrlValue) string {
 			all_keys.sort()
 			for k in all_keys {
 				val := v.get(k) or { VrlValue(VrlNull{}) }
-				parts << '"${k}": ${vrl_to_json(val)}'
+				parts << '"${k}":${vrl_to_json(val)}'
 			}
-			return '{${parts.join(", ")}}'
+			return '{${parts.join(",")}}'
+		}
+	}
+}
+
+// vrl_to_json_pretty converts a VrlValue to pretty-printed JSON.
+pub fn vrl_to_json_pretty(v VrlValue, indent int) string {
+	prefix := '  '.repeat(indent)
+	inner := '  '.repeat(indent + 1)
+	match v {
+		string { return json.encode(v) }
+		int { return '${v}' }
+		f64 { return format_float(v) }
+		bool { return if v { 'true' } else { 'false' } }
+		VrlNull { return 'null' }
+		Timestamp {
+			ts := format_timestamp(v.t)
+			return "\"t'${ts}'\""
+		}
+		VrlRegex { return "\"r'${v.pattern}'\"" }
+		[]VrlValue {
+			if v.len == 0 { return '[]' }
+			mut parts := []string{}
+			for item in v {
+				parts << '${inner}${vrl_to_json_pretty(item, indent + 1)}'
+			}
+			return '[\n${parts.join(",\n")}\n${prefix}]'
+		}
+		ObjectMap {
+			if v.len() == 0 { return '{}' }
+			mut parts := []string{}
+			mut all_keys := v.keys()
+			all_keys.sort()
+			for k in all_keys {
+				val := v.get(k) or { VrlValue(VrlNull{}) }
+				parts << '${inner}"${k}": ${vrl_to_json_pretty(val, indent + 1)}'
+			}
+			return '{\n${parts.join(",\n")}\n${prefix}}'
 		}
 	}
 }
