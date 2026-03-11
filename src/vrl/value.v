@@ -49,7 +49,7 @@ pub fn vrl_to_string(v VrlValue) string {
 			return 'null'
 		}
 		Timestamp {
-			return v.t.format_rfc3339()
+			return format_timestamp(v.t)
 		}
 		VrlRegex {
 			return v.pattern
@@ -61,6 +61,13 @@ pub fn vrl_to_string(v VrlValue) string {
 			return vrl_to_json(VrlValue(v))
 		}
 	}
+}
+
+// format_timestamp formats a time.Time as RFC3339 with Z suffix for UTC.
+fn format_timestamp(t time.Time) string {
+	s := t.format_rfc3339()
+	// Strip .000 milliseconds if zero (e.g., "2021-02-02T19:41:00.000Z" → "2021-02-02T19:41:00Z")
+	return s.replace('.000Z', 'Z').replace('.000+', '+').replace('.000-', '-')
 }
 
 // format_float formats a float, stripping trailing zeros but keeping at least one decimal.
@@ -92,10 +99,11 @@ pub fn vrl_to_json(v VrlValue) string {
 			return 'null'
 		}
 		Timestamp {
-			return '"${v.t.format_rfc3339()}"'
+			ts := format_timestamp(v.t)
+			return "\"t'${ts}'\""
 		}
 		VrlRegex {
-			return '"${v.pattern}"'
+			return "\"r'${v.pattern}'\""
 		}
 		[]VrlValue {
 			mut parts := []string{}

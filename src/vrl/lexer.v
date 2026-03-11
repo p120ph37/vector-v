@@ -6,6 +6,7 @@ pub enum TokenKind {
 	integer       // 42
 	float         // 3.14
 	string_lit    // "hello"
+	template_lit  // "hello {{ expr }}"
 	raw_string    // s'hello'
 	regex_lit     // r'pattern'
 	timestamp_lit // t'2024-01-01T00:00:00Z'
@@ -34,6 +35,7 @@ pub enum TokenKind {
 	assign   // =
 	pipe_assign // |=
 	question2 // ?? (error coalescing)
+	pipe      // | (single pipe, object merge)
 	// Delimiters
 	lparen    // (
 	rparen    // )
@@ -83,7 +85,10 @@ pub fn (mut l Lexer) tokenize() []Token {
 	mut tokens := []Token{}
 	for {
 		tok := l.next_token()
-		if tok.kind != .newline {
+		if tok.kind == .newline || tok.kind == .semicolon {
+			// Reset context so % at start of new line is metadata, not modulo
+			l.last_kind = .eof
+		} else {
 			l.last_kind = tok.kind
 		}
 		tokens << tok
@@ -131,9 +136,9 @@ fn (mut l Lexer) next_token() Token {
 		return l.read_single_string(start_line, start_col)
 	}
 
-	// Dot paths: .foo.bar
+	// Dot paths: .foo.bar or .foo@bar
 	if ch == `.` && l.pos + 1 < l.src.len && (l.src[l.pos + 1].is_letter()
-		|| l.src[l.pos + 1] == `_`) {
+		|| l.src[l.pos + 1] == `_` || l.src[l.pos + 1] == `@`) {
 		return l.read_dot_path(start_line, start_col)
 	}
 
@@ -192,6 +197,7 @@ fn (mut l Lexer) next_token() Token {
 		`<` { TokenKind.lt }
 		`>` { TokenKind.gt }
 		`!` { TokenKind.not }
+		`|` { TokenKind.pipe }
 		`(` { TokenKind.lparen }
 		`)` { TokenKind.rparen }
 		`[` { TokenKind.lbracket }
@@ -277,20 +283,38 @@ fn (mut l Lexer) read_number(line int, col int) Token {
 fn (mut l Lexer) read_string(line int, col int) Token {
 	l.advance() // skip opening "
 	mut result := []u8{}
+	mut has_template := false
 	for l.pos < l.src.len && l.src[l.pos] != `"` {
 		if l.src[l.pos] == `\\` && l.pos + 1 < l.src.len {
+			next := l.src[l.pos + 1]
 			l.advance()
-			match l.src[l.pos] {
+			match next {
 				`n` { result << `\n` }
 				`t` { result << `\t` }
 				`r` { result << `\r` }
 				`\\` { result << `\\` }
 				`"` { result << `"` }
 				`'` { result << `'` }
-				`{` { result << `{` }
+				`{` { result << `{` } // escaped brace — NOT template
 				`}` { result << `}` }
+				` `, `\n`, `\r` {
+					// Backslash followed by whitespace/newline: line continuation
+					// Skip all subsequent whitespace
+					if next == `\n` || next == `\r` {
+						l.advance()
+					}
+					for l.pos < l.src.len && (l.src[l.pos] == ` ` || l.src[l.pos] == `\t`
+						|| l.src[l.pos] == `\n` || l.src[l.pos] == `\r`) {
+						l.advance()
+					}
+					continue
+				}
 				else { result << l.src[l.pos] }
 			}
+		} else if l.src[l.pos] == `{` && l.pos + 1 < l.src.len && l.src[l.pos + 1] == `{` {
+			// Unescaped {{ — this is a template interpolation marker
+			has_template = true
+			result << l.src[l.pos]
 		} else {
 			result << l.src[l.pos]
 		}
@@ -299,7 +323,11 @@ fn (mut l Lexer) read_string(line int, col int) Token {
 	if l.pos < l.src.len {
 		l.advance() // skip closing "
 	}
-	return Token{kind: .string_lit, lit: result.bytestr(), line: line, col: col}
+	lit := result.bytestr()
+	if has_template {
+		return Token{kind: .template_lit, lit: lit, line: line, col: col}
+	}
+	return Token{kind: .string_lit, lit: lit, line: line, col: col}
 }
 
 fn (mut l Lexer) read_single_string(line int, col int) Token {
@@ -362,7 +390,7 @@ fn (mut l Lexer) read_dot_path(line int, col int) Token {
 	l.advance() // skip initial .
 	for l.pos < l.src.len
 		&& (l.src[l.pos].is_letter() || l.src[l.pos].is_digit() || l.src[l.pos] == `_`
-		|| l.src[l.pos] == `.`) {
+		|| l.src[l.pos] == `.` || l.src[l.pos] == `@`) {
 		l.advance()
 	}
 	// Check for array index like .foo[0]
