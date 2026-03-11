@@ -440,19 +440,35 @@ fn (mut p Parser) parse_ident_or_call() !Expr {
 fn (mut p Parser) parse_fn_call(name string) !Expr {
 	p.advance() // skip (
 	mut args := []Expr{}
+	mut arg_names := []string{}
 	for p.current().kind != .rparen && p.current().kind != .eof {
 		p.skip_newlines()
 		if p.current().kind == .rparen {
 			break
 		}
 		// Handle named arguments: name: expr
-		if p.current().kind == .ident && p.pos + 1 < p.tokens.len
-			&& p.tokens[p.pos + 1].kind == .colon {
-			p.advance() // skip name
-			p.advance() // skip :
+		// Named args can use identifiers or keywords (e.g., null: false, string: true)
+		mut arg_name := ''
+		if p.pos + 1 < p.tokens.len && p.tokens[p.pos + 1].kind == .colon {
+			cur := p.current().kind
+			if cur == .ident || cur == .null_lit || cur == .true_lit || cur == .false_lit {
+				arg_name = p.current().lit
+				if arg_name.len == 0 {
+					// For keyword tokens, lit may be empty; use the string form
+					arg_name = match cur {
+						.null_lit { 'null' }
+						.true_lit { 'true' }
+						.false_lit { 'false' }
+						else { '' }
+					}
+				}
+				p.advance() // skip name
+				p.advance() // skip :
+			}
 		}
 		arg := p.parse_expr()!
 		args << arg
+		arg_names << arg_name
 		p.skip_newlines()
 		if p.current().kind == .comma {
 			p.advance()
@@ -473,6 +489,7 @@ fn (mut p Parser) parse_fn_call(name string) !Expr {
 	return Expr(FnCallExpr{
 		name: name
 		args: args
+		arg_names: arg_names
 		closure: closure
 	})
 }

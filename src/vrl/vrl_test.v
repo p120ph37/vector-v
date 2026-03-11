@@ -138,14 +138,14 @@ fn test_if_expression() {
 fn test_array_literal() {
 	result := execute('[1, 2, 3]', map[string]VrlValue{}) or { panic(err) }
 	json_str := vrl_to_json(result)
-	assert json_str == '[1, 2, 3]'
+	assert json_str == '[1,2,3]'
 }
 
 fn test_object_literal() {
 	result := execute('{ "foo": 1, "bar": 2 }', map[string]VrlValue{}) or { panic(err) }
 	json_str := vrl_to_json(result)
-	assert json_str.contains('"foo": 1')
-	assert json_str.contains('"bar": 2')
+	assert json_str.contains('"foo":1')
+	assert json_str.contains('"bar":2')
 }
 
 fn test_downcase() {
@@ -175,7 +175,7 @@ fn test_to_string() {
 
 fn test_encode_json() {
 	result := execute('encode_json({"foo": "bar"})', map[string]VrlValue{}) or { panic(err) }
-	assert result == VrlValue('{"foo": "bar"}')
+	assert result == VrlValue('{"foo":"bar"}')
 }
 
 fn test_is_type_functions() {
@@ -211,8 +211,8 @@ fn test_abs() {
 fn test_merge_objects() {
 	result := execute('merge({"a": 1}, {"b": 2})', map[string]VrlValue{}) or { panic(err) }
 	json_str := vrl_to_json(result)
-	assert json_str.contains('"a": 1')
-	assert json_str.contains('"b": 2')
+	assert json_str.contains('"a":1')
+	assert json_str.contains('"b":2')
 }
 
 fn test_flatten_object() {
@@ -222,13 +222,13 @@ fn test_flatten_object() {
 	obj['a'] = VrlValue(inner)
 	result := execute('flatten(.)', obj) or { panic(err) }
 	json_str := vrl_to_json(result)
-	assert json_str.contains('"a.b": 1')
+	assert json_str.contains('"a.b":1')
 }
 
 fn test_split() {
 	result := execute('split("a,b,c", ",")', map[string]VrlValue{}) or { panic(err) }
 	json_str := vrl_to_json(result)
-	assert json_str == '["a", "b", "c"]'
+	assert json_str == '["a","b","c"]'
 }
 
 fn test_join() {
@@ -239,7 +239,7 @@ fn test_join() {
 fn test_compact_array() {
 	result := execute('compact(["a", null, "b"])', map[string]VrlValue{}) or { panic(err) }
 	json_str := vrl_to_json(result)
-	assert json_str == '["a", "b"]'
+	assert json_str == '["a","b"]'
 }
 
 fn test_multiplication() {
@@ -284,8 +284,8 @@ fn test_merge_assign() {
 		panic(err)
 	}
 	json_str := vrl_to_json(result)
-	assert json_str.contains('"foo": 1')
-	assert json_str.contains('"bar": 2')
+	assert json_str.contains('"foo":1')
+	assert json_str.contains('"bar":2')
 }
 
 fn test_multiline_program() {
@@ -297,9 +297,9 @@ fn test_multiline_program() {
 '
 	result := execute(src, map[string]VrlValue{}) or { panic(err) }
 	json_str := vrl_to_json(result)
-	assert json_str.contains('"foo": "test"')
-	assert json_str.contains('"bar": "hello"')
-	assert json_str.contains('"baz": 42')
+	assert json_str.contains('"foo":"test"')
+	assert json_str.contains('"bar":"hello"')
+	assert json_str.contains('"baz":42')
 }
 
 fn test_integer_with_underscores() {
@@ -312,7 +312,7 @@ fn test_integer_with_underscores() {
 fn test_push() {
 	result := execute('push([1, 2], 3)', map[string]VrlValue{}) or { panic(err) }
 	json_str := vrl_to_json(result)
-	assert json_str == '[1, 2, 3]'
+	assert json_str == '[1,2,3]'
 }
 
 fn test_replace() {

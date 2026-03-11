@@ -1,7 +1,239 @@
 module vrl
 
+import math
+import os
+import rand
 import regex
 import time
+
+// resolve_named_args evaluates function arguments and resolves named args into a map.
+fn (mut rt Runtime) resolve_named_args(expr FnCallExpr) !([]VrlValue, map[string]VrlValue) {
+	mut positional := []VrlValue{}
+	mut named := map[string]VrlValue{}
+	for i, arg in expr.args {
+		val := rt.eval(arg)!
+		if i < expr.arg_names.len && expr.arg_names[i].len > 0 {
+			named[expr.arg_names[i]] = val
+		} else {
+			positional << val
+		}
+	}
+	return positional, named
+}
+
+// get_named_bool gets a boolean named argument with a default.
+fn get_named_bool(named map[string]VrlValue, key string, default_val bool) bool {
+	if v := named[key] {
+		match v {
+			bool { return v }
+			else { return default_val }
+		}
+	}
+	return default_val
+}
+
+// get_named_int gets an integer named argument with a default.
+fn get_named_int(named map[string]VrlValue, key string, default_val int) int {
+	if v := named[key] {
+		match v {
+			int { return v }
+			else { return default_val }
+		}
+	}
+	return default_val
+}
+
+// get_named_string gets a string named argument with a default.
+fn get_named_string(named map[string]VrlValue, key string, default_val string) string {
+	if v := named[key] {
+		match v {
+			string { return v }
+			else { return default_val }
+		}
+	}
+	return default_val
+}
+
+// eval_fn_call_named handles function calls with named arguments.
+fn (mut rt Runtime) eval_fn_call_named(name string, expr FnCallExpr) !VrlValue {
+	pos, named := rt.resolve_named_args(expr)!
+	match name {
+		'compact' {
+			if pos.len < 1 { return error('compact requires 1 argument') }
+			return fn_compact_named(pos[0], named)
+		}
+		'contains' {
+			if pos.len < 2 { return error('contains requires 2 arguments') }
+			cs := get_named_bool(named, 'case_sensitive', true)
+			mut args := [pos[0], pos[1]]
+			args << VrlValue(cs)
+			return fn_contains(args)
+		}
+		'starts_with' {
+			if pos.len < 2 { return error('starts_with requires 2 arguments') }
+			cs := get_named_bool(named, 'case_sensitive', true)
+			mut args := [pos[0], pos[1]]
+			args << VrlValue(cs)
+			return fn_starts_with(args)
+		}
+		'ends_with' {
+			if pos.len < 2 { return error('ends_with requires 2 arguments') }
+			cs := get_named_bool(named, 'case_sensitive', true)
+			mut args := [pos[0], pos[1]]
+			args << VrlValue(cs)
+			return fn_ends_with(args)
+		}
+		'replace' {
+			if pos.len < 3 { return error('replace requires 3 arguments') }
+			count := get_named_int(named, 'count', -1)
+			mut args := [pos[0], pos[1], pos[2]]
+			args << VrlValue(count)
+			return fn_replace(args)
+		}
+		'split' {
+			if pos.len < 2 { return error('split requires 2 arguments') }
+			limit := get_named_int(named, 'limit', 0)
+			mut args := [pos[0], pos[1]]
+			args << VrlValue(limit)
+			return fn_split(args)
+		}
+		'truncate' {
+			if pos.len < 1 { return error('truncate requires at least 1 argument') }
+			limit := if pos.len > 1 { pos[1] } else { VrlValue(get_named_int(named, 'limit', 0)) }
+			suffix := get_named_string(named, 'suffix', '')
+			ellipsis := get_named_bool(named, 'ellipsis', false)
+			eff_suffix := if suffix.len > 0 { suffix } else { if ellipsis { '...' } else { '' } }
+			mut args := [pos[0], limit]
+			args << VrlValue(eff_suffix)
+			return fn_truncate(args)
+		}
+		'flatten' {
+			if pos.len < 1 { return error('flatten requires 1 argument') }
+			sep := get_named_string(named, 'separator', '.')
+			mut args := [pos[0]]
+			args << VrlValue(sep)
+			return fn_flatten(args)
+		}
+		'format_number' {
+			if pos.len < 1 { return error('format_number requires 1 argument') }
+			scale := if pos.len > 1 { pos[1] } else { VrlValue(get_named_int(named, 'scale', -1)) }
+			dec_sep := get_named_string(named, 'decimal_separator', '.')
+			grp_sep := get_named_string(named, 'grouping_separator', '')
+			mut args := [pos[0], scale]
+			args << VrlValue(dec_sep)
+			args << VrlValue(grp_sep)
+			return fn_format_number(args)
+		}
+		'ceil' {
+			if pos.len < 1 { return error('ceil requires 1 argument') }
+			prec := if pos.len > 1 { pos[1] } else { VrlValue(get_named_int(named, 'precision', 0)) }
+			return fn_ceil([pos[0], prec])
+		}
+		'floor' {
+			if pos.len < 1 { return error('floor requires 1 argument') }
+			prec := if pos.len > 1 { pos[1] } else { VrlValue(get_named_int(named, 'precision', 0)) }
+			return fn_floor([pos[0], prec])
+		}
+		'round' {
+			if pos.len < 1 { return error('round requires 1 argument') }
+			prec := if pos.len > 1 { pos[1] } else { VrlValue(get_named_int(named, 'precision', 0)) }
+			return fn_round([pos[0], prec])
+		}
+		'encode_json' {
+			if pos.len < 1 { return error('encode_json requires 1 argument') }
+			pretty := get_named_bool(named, 'pretty', false)
+			mut args := [pos[0]]
+			args << VrlValue(pretty)
+			return fn_encode_json(args)
+		}
+		'to_unix_timestamp' {
+			if pos.len < 1 { return error('to_unix_timestamp requires 1 argument') }
+			unit := get_named_string(named, 'unit', 'seconds')
+			mut args := [pos[0]]
+			args << VrlValue(unit)
+			return fn_to_unix_timestamp(args)
+		}
+		'parse_json', 'decode_json' {
+			if pos.len < 1 { return error('parse_json requires 1 argument') }
+			max_depth := get_named_int(named, 'max_depth', 0)
+			mut args := [pos[0]]
+			args << VrlValue(max_depth)
+			return fn_decode_json(args)
+		}
+		'assert' {
+			if pos.len < 1 { return error('assert requires 1 argument') }
+			msg := get_named_string(named, 'message', 'assertion failed')
+			mut args := [pos[0]]
+			args << VrlValue(msg)
+			return fn_assert(args)
+		}
+		'assert_eq' {
+			if pos.len < 2 { return error('assert_eq requires 2 arguments') }
+			msg := get_named_string(named, 'message', '')
+			mut args := [pos[0], pos[1]]
+			if msg.len > 0 { args << VrlValue(msg) }
+			return fn_assert_eq(args)
+		}
+		else {
+			// Fallback: pass all positional args to the general dispatch
+			mut all_args := pos.clone()
+			for _, v in named {
+				all_args << v
+			}
+			return rt.eval_fn_call_positional(name, all_args)
+		}
+	}
+}
+
+fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlValue {
+	match name {
+		'to_string' { return fn_to_string(args) }
+		'downcase' { return fn_downcase(args) }
+		'upcase' { return fn_upcase(args) }
+		'contains' { return fn_contains(args) }
+		'starts_with' { return fn_starts_with(args) }
+		'ends_with' { return fn_ends_with(args) }
+		'length' { return fn_length(args) }
+		'strip_whitespace', 'trim' { return fn_strip_whitespace(args) }
+		'replace' { return fn_replace(args) }
+		'slice' { return fn_slice(args) }
+		'split' { return fn_split(args) }
+		'join' { return fn_join(args) }
+		'strlen' { return fn_strlen(args) }
+		'truncate' { return fn_truncate(args) }
+		'to_int', 'int' { return fn_to_int(args) }
+		'to_float', 'float' { return fn_to_float(args) }
+		'to_bool', 'bool' { return fn_to_bool(args) }
+		'string' { return fn_string(args) }
+		'is_nullish' { return fn_is_nullish(args) }
+		'keys' { return fn_keys(args) }
+		'values' { return fn_values(args) }
+		'flatten' { return fn_flatten(args) }
+		'merge' { return fn_merge(args) }
+		'compact' { return fn_compact(args) }
+		'push' { return fn_push(args) }
+		'append' { return fn_append(args) }
+		'encode_json' { return fn_encode_json(args) }
+		'decode_json', 'parse_json' { return fn_decode_json(args) }
+		'abs' { return fn_abs(args) }
+		'ceil' { return fn_ceil(args) }
+		'floor' { return fn_floor(args) }
+		'round' { return fn_round(args) }
+		'mod' { return fn_mod(args) }
+		'format_number' { return fn_format_number(args) }
+		else { return error('unknown function: ${name}') }
+	}
+}
+
+fn fn_compact_named(v VrlValue, named map[string]VrlValue) !VrlValue {
+	null_flag := get_named_bool(named, 'null', true)
+	string_flag := get_named_bool(named, 'string', true)
+	object_flag := get_named_bool(named, 'object', true)
+	array_flag := get_named_bool(named, 'array', true)
+	nullish_flag := get_named_bool(named, 'nullish', false)
+	recursive := get_named_bool(named, 'recursive', true)
+	return compact_value(v, null_flag, string_flag, object_flag, array_flag, nullish_flag, recursive)
+}
 
 // eval_fn_call dispatches built-in VRL functions.
 fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
@@ -16,6 +248,12 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 	if name == 'exists' { return rt.fn_exists(expr) }
 	if name == 'filter' { return rt.fn_filter(expr) }
 	if name == 'for_each' { return rt.fn_for_each(expr) }
+
+	// If any args are named, use named-arg dispatch
+	has_named := expr.arg_names.len > 0 && expr.arg_names.any(it.len > 0)
+	if has_named {
+		return rt.eval_fn_call_named(name, expr)
+	}
 
 	// Fast path for common 1-arg functions: evaluate arg directly without []VrlValue alloc
 	if expr.args.len == 1 {
@@ -36,7 +274,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 				}
 			}
 			'to_string' { return fn_to_string([a0]) }
-		'format_number' { return VrlValue(vrl_to_string(a0)) }
+		'format_number' { return fn_format_number([a0]) }
 			'to_int', 'int' { return fn_to_int([a0]) }
 			'to_float', 'float' { return fn_to_float([a0]) }
 			'to_bool', 'bool' { return fn_to_bool([a0]) }
@@ -51,7 +289,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'is_array' { return VrlValue(a0 is []VrlValue) }
 			'is_object' { return VrlValue(a0 is ObjectMap) }
 			'is_nullish' { return fn_is_nullish([a0]) }
-			'encode_json' { return VrlValue(vrl_to_json(a0)) }
+			'encode_json' { return fn_encode_json([a0]) }
 			'decode_json', 'parse_json' { return fn_decode_json([a0]) }
 			'keys' { return fn_keys([a0]) }
 			'values' { return fn_values([a0]) }
@@ -145,11 +383,11 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		'mod' { return fn_mod(args) }
 		'assert' { return fn_assert(args) }
 		'assert_eq' { return fn_assert_eq(args) }
-		'now' { return VrlValue(Timestamp{}) }
-		'format_number' { return fn_to_string(args) }
-		'to_unix_timestamp' { return VrlValue(0) }
-		'get_env_var' { return error('environment variable not found') }
-		'uuid_v4' { return VrlValue('00000000-0000-4000-8000-000000000000') }
+		'now' { return VrlValue(Timestamp{t: time.now()}) }
+		'format_number' { return fn_format_number(args) }
+		'to_unix_timestamp' { return fn_to_unix_timestamp(args) }
+		'get_env_var' { return fn_get_env_var(args) }
+		'uuid_v4' { return fn_uuid_v4() }
 		'array' { return fn_ensure_array(args) }
 		'object' { return fn_ensure_object(args) }
 		'pop' { return fn_pop(args) }
@@ -211,10 +449,16 @@ fn fn_contains(args []VrlValue) !VrlValue {
 	if args.len < 2 { return error('contains requires 2 arguments') }
 	a := args[0]
 	b := args[1]
+	case_sensitive := if args.len > 2 { get_bool_arg(args[2], true) } else { true }
 	match a {
 		string {
 			match b {
-				string { return VrlValue(a.contains(b)) }
+				string {
+					if case_sensitive {
+						return VrlValue(a.contains(b))
+					}
+					return VrlValue(a.to_lower().contains(b.to_lower()))
+				}
 				else { return error('contains second arg must be string') }
 			}
 		}
@@ -226,10 +470,16 @@ fn fn_starts_with(args []VrlValue) !VrlValue {
 	if args.len < 2 { return error('starts_with requires 2 arguments') }
 	a := args[0]
 	b := args[1]
+	case_sensitive := if args.len > 2 { get_bool_arg(args[2], true) } else { true }
 	match a {
 		string {
 			match b {
-				string { return VrlValue(a.starts_with(b)) }
+				string {
+					if case_sensitive {
+						return VrlValue(a.starts_with(b))
+					}
+					return VrlValue(a.to_lower().starts_with(b.to_lower()))
+				}
 				else { return error('starts_with second arg must be string') }
 			}
 		}
@@ -241,14 +491,27 @@ fn fn_ends_with(args []VrlValue) !VrlValue {
 	if args.len < 2 { return error('ends_with requires 2 arguments') }
 	a := args[0]
 	b := args[1]
+	case_sensitive := if args.len > 2 { get_bool_arg(args[2], true) } else { true }
 	match a {
 		string {
 			match b {
-				string { return VrlValue(a.ends_with(b)) }
+				string {
+					if case_sensitive {
+						return VrlValue(a.ends_with(b))
+					}
+					return VrlValue(a.to_lower().ends_with(b.to_lower()))
+				}
 				else { return error('ends_with second arg must be string') }
 			}
 		}
 		else { return error('ends_with first arg must be string') }
+	}
+}
+
+fn get_bool_arg(v VrlValue, default_val bool) bool {
+	match v {
+		bool { return v }
+		else { return default_val }
 	}
 }
 
@@ -285,13 +548,37 @@ fn fn_replace(args []VrlValue) !VrlValue {
 		string { a2 }
 		else { return error('replace third arg must be string') }
 	}
+	count := if args.len > 3 { get_int_arg(args[3], -1) } else { -1 }
 	// Pattern can be a string or regex
 	p := a1
 	match p {
-		string { return VrlValue(s.replace(p, replacement)) }
+		string {
+			if count == 1 {
+				// Replace only first occurrence
+				idx := s.index(p) or { return VrlValue(s) }
+				result := s[..idx] + replacement + s[idx + p.len..]
+				return VrlValue(result)
+			}
+			return VrlValue(s.replace(p, replacement))
+		}
 		VrlRegex {
 			mut re := regex.regex_opt(p.pattern) or { return VrlValue(s) }
-			result := re.replace(s, replacement)
+			if count == 1 {
+				// Replace only first match
+				start, end := re.find(s)
+				if start >= 0 {
+					result := s[..start] + replacement + s[end..]
+					return VrlValue(result)
+				}
+				return VrlValue(s)
+			}
+			// Replace all matches
+			mut result := s
+			for _ in 0 .. 100 { // safety limit
+				start2, end2 := re.find(result)
+				if start2 < 0 { break }
+				result = result[..start2] + replacement + result[end2..]
+			}
 			return VrlValue(result)
 		}
 		else { return error('replace second arg must be string or regex') }
@@ -306,14 +593,65 @@ fn fn_split(args []VrlValue) !VrlValue {
 		string { a0 }
 		else { return error('split first arg must be string') }
 	}
-	delim := match a1 {
-		string { a1 }
-		else { return error('split second arg must be string') }
+	limit := if args.len > 2 { get_int_arg(args[2], 0) } else { 0 }
+	// Pattern can be string or regex
+	p := a1
+	match p {
+		string {
+			return split_string_with_limit(s, p, limit)
+		}
+		VrlRegex {
+			return split_regex_with_limit(s, p.pattern, limit)
+		}
+		else { return error('split second arg must be string or regex') }
 	}
-	parts := s.split(delim)
+}
+
+fn split_string_with_limit(s string, delim string, limit int) !VrlValue {
+	if limit <= 0 {
+		parts := s.split(delim)
+		mut result := []VrlValue{}
+		for p in parts {
+			result << VrlValue(p)
+		}
+		return VrlValue(result)
+	}
 	mut result := []VrlValue{}
-	for p in parts {
-		result << VrlValue(p)
+	mut remaining := s
+	for _ in 0 .. limit - 1 {
+		idx := remaining.index(delim) or { break }
+		result << VrlValue(remaining[..idx])
+		remaining = remaining[idx + delim.len..]
+	}
+	result << VrlValue(remaining)
+	return VrlValue(result)
+}
+
+fn split_regex_with_limit(s string, pattern string, limit int) !VrlValue {
+	mut re := regex.regex_opt(pattern) or { return error('invalid regex in split') }
+	mut result := []VrlValue{}
+	mut pos := 0
+	mut count := 0
+	for pos <= s.len {
+		if limit > 0 && count >= limit - 1 {
+			result << VrlValue(s[pos..])
+			return VrlValue(result)
+		}
+		start, end := re.find(s[pos..])
+		if start < 0 {
+			result << VrlValue(s[pos..])
+			return VrlValue(result)
+		}
+		result << VrlValue(s[pos..pos + start])
+		pos = pos + end
+		count++
+		if start == end {
+			if pos < s.len {
+				result << VrlValue(s[pos..pos + 1])
+				count++
+			}
+			pos++
+		}
 	}
 	return VrlValue(result)
 }
@@ -407,20 +745,21 @@ fn fn_truncate(args []VrlValue) !VrlValue {
 	}
 	max_len := match a1 {
 		int { a1 }
+		f64 { int(a1) }
 		else { return error('truncate second arg must be integer') }
 	}
-	mut ellipsis := false
+	mut suffix := ''
 	if args.len > 2 {
 		a2 := args[2]
 		match a2 {
-			bool { ellipsis = a2 }
+			bool { if a2 { suffix = '...' } }
+			string { suffix = a2 }
 			else {}
 		}
 	}
 	if s.len <= max_len { return VrlValue(s) }
 	truncated := s[..max_len]
-	if ellipsis { return VrlValue(truncated + '...') }
-	return VrlValue(truncated)
+	return VrlValue(truncated + suffix)
 }
 
 // Type functions
@@ -435,6 +774,10 @@ fn fn_to_int(args []VrlValue) !VrlValue {
 			return VrlValue(v)
 		}
 		string { return VrlValue(a.int()) }
+		VrlNull { return VrlValue(0) }
+		Timestamp {
+			return VrlValue(int(a.t.unix()))
+		}
 		else { return error("can't convert to integer") }
 	}
 }
@@ -446,6 +789,15 @@ fn fn_to_float(args []VrlValue) !VrlValue {
 		f64 { return VrlValue(a) }
 		int { return VrlValue(f64(a)) }
 		string { return VrlValue(a.f64()) }
+		bool {
+			v := if a { 1.0 } else { 0.0 }
+			return VrlValue(v)
+		}
+		VrlNull { return VrlValue(0.0) }
+		Timestamp {
+			// Convert to Unix timestamp as float (seconds)
+			return VrlValue(f64(a.t.unix()))
+		}
 		else { return error("can't convert to float") }
 	}
 }
@@ -455,8 +807,18 @@ fn fn_to_bool(args []VrlValue) !VrlValue {
 	a := args[0]
 	match a {
 		bool { return VrlValue(a) }
-		string { return VrlValue(a == 'true' || a == 'yes' || a == '1') }
+		string {
+			lower := a.to_lower()
+			if lower == 'true' || lower == 'yes' || lower == 'y' || lower == 't' || lower == '1' {
+				return VrlValue(true)
+			}
+			if lower == 'false' || lower == 'no' || lower == 'n' || lower == 'f' || lower == '0' {
+				return VrlValue(false)
+			}
+			return error("can't convert to boolean")
+		}
 		int { return VrlValue(a != 0) }
+		f64 { return VrlValue(a != 0.0) }
 		VrlNull { return VrlValue(false) }
 		else { return error("can't convert to boolean") }
 	}
@@ -492,7 +854,10 @@ fn fn_is_nullish(args []VrlValue) !VrlValue {
 	a := args[0]
 	match a {
 		VrlNull { return VrlValue(true) }
-		string { return VrlValue(a.trim_space().len == 0) }
+		string {
+			trimmed := a.trim_space()
+			return VrlValue(trimmed.len == 0 || trimmed == '-')
+		}
 		else { return VrlValue(false) }
 	}
 }
@@ -626,11 +991,15 @@ fn fn_values(args []VrlValue) !VrlValue {
 
 fn fn_flatten(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('flatten requires 1 argument') }
+	sep := if args.len > 1 {
+		s := args[1]
+		match s { string { s } else { '.' } }
+	} else { '.' }
 	a := args[0]
 	match a {
 		ObjectMap {
 			mut result := new_object_map()
-			flatten_object(a, '', mut result)
+			flatten_object(a, '', sep, mut result)
 			return VrlValue(result)
 		}
 		[]VrlValue {
@@ -642,14 +1011,14 @@ fn fn_flatten(args []VrlValue) !VrlValue {
 	}
 }
 
-fn flatten_object(obj ObjectMap, prefix string, mut result ObjectMap) {
+fn flatten_object(obj ObjectMap, prefix string, sep string, mut result ObjectMap) {
 	if obj.is_large {
 		for k, v in obj.hm {
-			full_key := if prefix.len > 0 { '${prefix}.${k}' } else { k }
+			full_key := if prefix.len > 0 { '${prefix}${sep}${k}' } else { k }
 			val := v
 			match val {
 				ObjectMap {
-					flatten_object(val, full_key, mut result)
+					flatten_object(val, full_key, sep, mut result)
 				}
 				else {
 					result.set(full_key, v)
@@ -658,11 +1027,11 @@ fn flatten_object(obj ObjectMap, prefix string, mut result ObjectMap) {
 		}
 	} else {
 		for i in 0 .. obj.ks.len {
-			full_key := if prefix.len > 0 { '${prefix}.${obj.ks[i]}' } else { obj.ks[i] }
+			full_key := if prefix.len > 0 { '${prefix}${sep}${obj.ks[i]}' } else { obj.ks[i] }
 			val := obj.vs[i]
 			match val {
 				ObjectMap {
-					flatten_object(val, full_key, mut result)
+					flatten_object(val, full_key, sep, mut result)
 				}
 				else {
 					result.set(full_key, obj.vs[i])
@@ -749,44 +1118,68 @@ fn fn_merge(args []VrlValue) !VrlValue {
 
 fn fn_compact(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('compact requires 1 argument') }
-	a := args[0]
+	// Parse optional flags: null, string, object, array, nullish, recursive
+	// Defaults: null=true, string=true, object=true, array=true, nullish=false, recursive=true
+	null_flag := if args.len > 1 { get_bool_arg(args[1], true) } else { true }
+	string_flag := if args.len > 2 { get_bool_arg(args[2], true) } else { true }
+	object_flag := if args.len > 3 { get_bool_arg(args[3], true) } else { true }
+	array_flag := if args.len > 4 { get_bool_arg(args[4], true) } else { true }
+	nullish_flag := if args.len > 5 { get_bool_arg(args[5], false) } else { false }
+	recursive := if args.len > 6 { get_bool_arg(args[6], true) } else { true }
+	return compact_value(args[0], null_flag, string_flag, object_flag, array_flag, nullish_flag, recursive)
+}
+
+fn compact_value(v VrlValue, null_flag bool, string_flag bool, object_flag bool, array_flag bool, nullish_flag bool, recursive bool) !VrlValue {
+	a := v
 	match a {
 		[]VrlValue {
 			mut result := []VrlValue{}
 			for item in a {
-				i := item
-				match i {
-					VrlNull {}
-					string { if i.len > 0 { result << item } }
-					else { result << item }
+				mut val := item
+				if recursive {
+					val = compact_value(item, null_flag, string_flag, object_flag, array_flag, nullish_flag, recursive) or { item }
 				}
+				if should_compact(val, null_flag, string_flag, object_flag, array_flag, nullish_flag) {
+					continue
+				}
+				result << val
 			}
 			return VrlValue(result)
 		}
 		ObjectMap {
 			mut result := new_object_map()
-			if a.is_large {
-				for k, v in a.hm {
-					val := v
-					match val {
-						VrlNull {}
-						string { if val.len > 0 { result.set(k, v) } }
-						else { result.set(k, v) }
-					}
+			all_keys := a.keys()
+			for k in all_keys {
+				item := a.get(k) or { VrlValue(VrlNull{}) }
+				mut val := item
+				if recursive {
+					val = compact_value(item, null_flag, string_flag, object_flag, array_flag, nullish_flag, recursive) or { item }
 				}
-			} else {
-				for i in 0 .. a.ks.len {
-					val := a.vs[i]
-					match val {
-						VrlNull {}
-						string { if val.len > 0 { result.set(a.ks[i], a.vs[i]) } }
-						else { result.set(a.ks[i], a.vs[i]) }
-					}
+				if should_compact(val, null_flag, string_flag, object_flag, array_flag, nullish_flag) {
+					continue
 				}
+				result.set(k, val)
 			}
 			return VrlValue(result)
 		}
-		else { return error('compact requires array or object') }
+		else { return v }
+	}
+}
+
+fn should_compact(v VrlValue, null_flag bool, string_flag bool, object_flag bool, array_flag bool, nullish_flag bool) bool {
+	a := v
+	match a {
+		VrlNull { return null_flag || nullish_flag }
+		string {
+			if nullish_flag {
+				trimmed := a.trim_space()
+				return trimmed.len == 0 || trimmed == '-'
+			}
+			return string_flag && a.len == 0
+		}
+		[]VrlValue { return array_flag && a.len == 0 }
+		ObjectMap { return object_flag && a.len() == 0 }
+		else { return false }
 	}
 }
 
@@ -884,20 +1277,79 @@ fn (mut rt Runtime) fn_for_each(expr FnCallExpr) !VrlValue {
 
 fn fn_encode_json(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('encode_json requires 1 argument') }
+	pretty := if args.len > 1 { get_bool_arg(args[1], false) } else { false }
+	if pretty {
+		return VrlValue(vrl_to_json_pretty(args[0], 0))
+	}
 	return VrlValue(vrl_to_json(args[0]))
 }
 
 fn fn_decode_json(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('parse_json requires 1 argument') }
 	a := args[0]
+	max_depth := if args.len > 1 { get_int_arg(args[1], 0) } else { 0 }
 	match a {
-		string { return parse_json_value(a) }
+		string {
+			if max_depth > 0 {
+				return parse_json_with_depth(a, max_depth, 1)
+			}
+			return parse_json_recursive(a)
+		}
 		else { return error('parse_json requires a string argument') }
 	}
 }
 
-fn parse_json_value(s string) !VrlValue {
-	return parse_json_recursive(s)
+fn parse_json_with_depth(s string, max_depth int, current_depth int) !VrlValue {
+	trimmed := s.trim_space()
+	if trimmed.len == 0 { return VrlValue(VrlNull{}) }
+	if trimmed == 'null' { return VrlValue(VrlNull{}) }
+	if trimmed == 'true' { return VrlValue(true) }
+	if trimmed == 'false' { return VrlValue(false) }
+	if trimmed.starts_with('"') && trimmed.ends_with('"') {
+		end := trimmed.len - 1
+		return VrlValue(trimmed[1..end])
+	}
+	if trimmed[0].is_digit() || (trimmed[0] == `-` && trimmed.len > 1) {
+		if trimmed.contains('.') { return VrlValue(trimmed.f64()) }
+		return VrlValue(trimmed.int())
+	}
+	if current_depth >= max_depth {
+		// At max depth, return the raw JSON string
+		return VrlValue(trimmed)
+	}
+	if trimmed.starts_with('[') {
+		end := trimmed.len - 1
+		inner := trimmed[1..end].trim_space()
+		if inner.len == 0 { return VrlValue([]VrlValue{}) }
+		parts := split_json_top_level(inner)
+		mut result := []VrlValue{}
+		for part in parts {
+			result << parse_json_with_depth(part.trim_space(), max_depth, current_depth + 1)!
+		}
+		return VrlValue(result)
+	}
+	if trimmed.starts_with('{') {
+		end := trimmed.len - 1
+		inner := trimmed[1..end].trim_space()
+		if inner.len == 0 { return VrlValue(new_object_map()) }
+		parts := split_json_top_level(inner)
+		mut result := new_object_map()
+		for part in parts {
+			colon_idx := find_colon(part)
+			if colon_idx > 0 {
+				key_str := part[..colon_idx].trim_space()
+				val_str := part[colon_idx + 1..].trim_space()
+				mut key := key_str
+				if key_str.starts_with('"') && key_str.ends_with('"') {
+					kend := key_str.len - 1
+					key = key_str[1..kend]
+				}
+				result.set(key, parse_json_with_depth(val_str, max_depth, current_depth + 1)!)
+			}
+		}
+		return VrlValue(result)
+	}
+	return error('unable to parse JSON: ${trimmed}')
 }
 
 // Simple recursive JSON parser that produces VrlValues directly
@@ -1022,24 +1474,48 @@ fn fn_abs(args []VrlValue) !VrlValue {
 
 fn fn_ceil(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('ceil requires 1 argument') }
+	precision := if args.len > 1 {
+		p := args[1]
+		match p { int { p } else { 0 } }
+	} else { 0 }
 	a := args[0]
 	match a {
 		f64 {
-			i := int(a)
-			if a > f64(i) { return VrlValue(i + 1) }
-			return VrlValue(i)
+			if precision > 0 {
+				mut mult := 1.0
+				for _ in 0 .. precision { mult *= 10.0 }
+				return VrlValue(math.ceil(a * mult) / mult)
+			}
+			return VrlValue(int(math.ceil(a)))
 		}
-		int { return VrlValue(a) }
+		int {
+			if precision > 0 { return VrlValue(f64(a)) }
+			return VrlValue(a)
+		}
 		else { return error('ceil requires a number') }
 	}
 }
 
 fn fn_floor(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('floor requires 1 argument') }
+	precision := if args.len > 1 {
+		p := args[1]
+		match p { int { p } else { 0 } }
+	} else { 0 }
 	a := args[0]
 	match a {
-		f64 { return VrlValue(int(a)) }
-		int { return VrlValue(a) }
+		f64 {
+			if precision > 0 {
+				mut mult := 1.0
+				for _ in 0 .. precision { mult *= 10.0 }
+				return VrlValue(math.floor(a * mult) / mult)
+			}
+			return VrlValue(int(math.floor(a)))
+		}
+		int {
+			if precision > 0 { return VrlValue(f64(a)) }
+			return VrlValue(a)
+		}
 		else { return error('floor requires a number') }
 	}
 }
@@ -1140,7 +1616,7 @@ fn fn_match(args []VrlValue) !VrlValue {
 	}
 	// Use V's regex module for matching
 mut re := regex.regex_opt(pattern) or { return error('invalid regex: ${pattern}') }
-	start, _ := re.match_string(s)
+	start, _ := re.find(s)
 	return VrlValue(start >= 0)
 }
 
@@ -1163,7 +1639,7 @@ for p in patterns {
 			else { continue }
 		}
 		mut re := regex.regex_opt(pat) or { continue }
-		start, _ := re.match_string(s)
+		start, _ := re.find(s)
 		if start >= 0 { return VrlValue(true) }
 	}
 	return VrlValue(false)
@@ -1312,9 +1788,189 @@ fn fn_from_unix_timestamp(args []VrlValue) !VrlValue {
 	a := args[0]
 	match a {
 		int {
-		t := time.unix(a)
+			t := time.unix(a)
 			return VrlValue(Timestamp{t: t})
 		}
 		else { return error('from_unix_timestamp requires an integer') }
 	}
+}
+
+fn fn_format_number(args []VrlValue) !VrlValue {
+	if args.len < 1 { return error('format_number requires 1 argument') }
+	a := args[0]
+	val := match a {
+		f64 { a }
+		int { f64(a) }
+		else { return error('format_number requires a number') }
+	}
+	scale := if args.len > 1 { get_int_arg(args[1], -1) } else { -1 }
+	decimal_sep := if args.len > 2 {
+		s := args[2]
+		match s { string { s } else { '.' } }
+	} else { '.' }
+	grouping_sep := if args.len > 3 {
+		s := args[3]
+		match s { string { s } else { '' } }
+	} else { '' }
+
+	// Format the number
+	mut num_str := if scale >= 0 {
+		format_float_precision(val, scale)
+	} else {
+		format_float(val)
+	}
+
+	// Split into integer and decimal parts
+	mut int_part := num_str
+	mut dec_part := ''
+	dot_idx := num_str.index('.') or { -1 }
+	if dot_idx >= 0 {
+		int_part = num_str[..dot_idx]
+		dec_part = num_str[dot_idx + 1..]
+	} else if scale > 0 {
+		dec_part = '0'.repeat(scale)
+	}
+
+	// Apply grouping separator to integer part
+	if grouping_sep.len > 0 && int_part.len > 3 {
+		mut grouped := []u8{}
+		mut count := 0
+		for i := int_part.len - 1; i >= 0; i-- {
+			if count > 0 && count % 3 == 0 && int_part[i] != `-` {
+				for c in grouping_sep {
+					grouped << c
+				}
+			}
+			grouped << int_part[i]
+			count++
+		}
+		// Reverse
+		mut reversed := []u8{cap: grouped.len}
+		for i := grouped.len - 1; i >= 0; i-- {
+			reversed << grouped[i]
+		}
+		int_part = reversed.bytestr()
+	}
+
+	if dec_part.len > 0 {
+		return VrlValue(int_part + decimal_sep + dec_part)
+	}
+	return VrlValue(int_part)
+}
+
+fn format_float_precision(val f64, precision int) string {
+	if precision == 0 {
+		return '${int(val)}'
+	}
+	mut mult := 1.0
+	for _ in 0 .. precision { mult *= 10.0 }
+	rounded := math.round(val * mult) / mult
+	// Use strlong to avoid scientific notation for large numbers
+	s := strlong(rounded)
+	// Ensure we have exactly `precision` decimal places
+	dot_idx := s.index('.') or {
+		return s + '.' + '0'.repeat(precision)
+	}
+	dec := s[dot_idx + 1..]
+	if dec.len < precision {
+		return s + '0'.repeat(precision - dec.len)
+	}
+	if dec.len > precision {
+		return s[..dot_idx + 1 + precision]
+	}
+	return s
+}
+
+// strlong formats a float without scientific notation.
+fn strlong(f f64) string {
+	s := '${f}'
+	// If V uses scientific notation, convert manually
+	if !s.contains('e') && !s.contains('E') {
+		return s
+	}
+	// Parse scientific notation
+	mut mantissa := ''
+	mut exp := 0
+	e_idx := s.index_any('eE')
+	if e_idx >= 0 {
+		mantissa = s[..e_idx]
+		exp = s[e_idx + 1..].int()
+	} else {
+		return s
+	}
+	// Build the number string
+	dot_idx := mantissa.index('.') or { -1 }
+	mut digits := mantissa.replace('.', '').replace('-', '')
+	is_neg := f < 0
+
+	mut dec_pos := if dot_idx >= 0 {
+		if is_neg { dot_idx - 1 } else { dot_idx }
+	} else {
+		digits.len
+	}
+	dec_pos += exp
+
+	if dec_pos >= digits.len {
+		// No decimal part needed
+		for digits.len < dec_pos {
+			digits += '0'
+		}
+		result := digits
+		return if is_neg { '-${result}' } else { result }
+	}
+	if dec_pos <= 0 {
+		result := '0.${"0".repeat(-dec_pos)}${digits}'
+		return if is_neg { '-${result}' } else { result }
+	}
+	result := '${digits[..dec_pos]}.${digits[dec_pos..]}'
+	return if is_neg { '-${result}' } else { result }
+}
+
+fn fn_to_unix_timestamp(args []VrlValue) !VrlValue {
+	if args.len < 1 { return error('to_unix_timestamp requires 1 argument') }
+	a := args[0]
+	match a {
+		Timestamp {
+			unit := if args.len > 1 {
+				u := args[1]
+				match u { string { u } else { 'seconds' } }
+			} else { 'seconds' }
+			v := int(a.t.unix())
+			return VrlValue(v)
+		}
+		else { return error('to_unix_timestamp requires a timestamp') }
+	}
+}
+
+fn fn_get_env_var(args []VrlValue) !VrlValue {
+	if args.len < 1 { return error('get_env_var requires 1 argument') }
+	a := args[0]
+	match a {
+		string {
+			val := os.getenv(a)
+			if val.len == 0 {
+				// Check if the env var actually exists but is empty
+				return error('environment variable not found: ${a}')
+			}
+			return VrlValue(val)
+		}
+		else { return error('get_env_var requires a string') }
+	}
+}
+
+fn fn_uuid_v4() !VrlValue {
+	hex := '0123456789abcdef'
+	mut buf := []u8{len: 36}
+	for i in 0 .. 36 {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			buf[i] = `-`
+		} else if i == 14 {
+			buf[i] = `4`
+		} else if i == 19 {
+			buf[i] = hex[rand.intn(4) or { 0 } + 8]
+		} else {
+			buf[i] = hex[rand.intn(16) or { 0 }]
+		}
+	}
+	return VrlValue(buf.bytestr())
 }
