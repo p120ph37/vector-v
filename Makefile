@@ -1,15 +1,15 @@
 .PHONY: build test test-vrl clean run-demo bench bench-v bench-rust
 
 build:
-	v -o vector-v src/
+	v -enable-globals -o vector-v src/
 
 test:
-	v test src/event/
-	v test src/conf/
-	v test src/transforms/
+	v -enable-globals test src/event/
+	v -enable-globals test src/conf/
+	v -enable-globals test src/transforms/
 
 test-vrl:
-	v test src/vrl/
+	v -enable-globals test src/vrl/
 
 clean:
 	rm -f vector-v
