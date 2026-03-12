@@ -291,5 +291,5 @@ fn test_upstream_stdlib_examples() {
 		}
 	}
 	os.write_file('/tmp/vrl_example_results.txt', report.join('\n')) or {}
-	assert failed <= 47, 'VRL examples: ${failed} failures (max 47 allowed). See /tmp/vrl_example_results.txt'
+	assert failed <= 46, 'VRL examples: ${failed} failures (max 46 allowed). See /tmp/vrl_example_results.txt'
 }

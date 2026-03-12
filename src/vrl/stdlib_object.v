@@ -371,7 +371,14 @@ fn remove_nested(container VrlValue, segments []VrlValue) !VrlValue {
 			s := seg
 			idx := match s {
 				i64 { if s < 0 { c.len + int(s) } else { int(s) } }
-				string { s.int() }
+				string {
+					// String segment on array: try to parse as integer, otherwise no-op
+					n := s.int()
+					if n == 0 && s != '0' {
+						return VrlValue(container)
+					}
+					n
+				}
 				else { return VrlValue(container) }
 			}
 			if rest.len == 0 {
