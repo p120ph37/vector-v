@@ -174,6 +174,60 @@ fn (mut rt Runtime) eval_fn_call_named(name string, expr FnCallExpr) !VrlValue {
 			if msg.len > 0 { args << VrlValue(msg) }
 			return fn_assert_eq(args)
 		}
+		'contains_all' {
+			if pos.len < 2 { return error('contains_all requires 2 arguments') }
+			cs := get_named_bool(named, 'case_sensitive', true)
+			mut args := [pos[0], pos[1]]
+			args << VrlValue(cs)
+			return fn_contains_all(args)
+		}
+		'unflatten' {
+			if pos.len < 1 { return error('unflatten requires 1 argument') }
+			sep := get_named_string(named, 'separator', '.')
+			mut args := [pos[0]]
+			args << VrlValue(sep)
+			return fn_unflatten(args)
+		}
+		'find' {
+			if pos.len < 2 { return error('find requires 2 arguments') }
+			from := get_named_int(named, 'from', 0)
+			mut args := [pos[0], pos[1]]
+			args << VrlValue(from)
+			return fn_find(args)
+		}
+		'get' {
+			value := if v := named['value'] { v } else if pos.len > 0 { pos[0] } else { return error('get requires value argument') }
+			path := if v := named['path'] { v } else if pos.len > 1 { pos[1] } else { return error('get requires path argument') }
+			return fn_get([value, path])
+		}
+		'set' {
+			value := if v := named['value'] { v } else if pos.len > 0 { pos[0] } else { return error('set requires value argument') }
+			path := if v := named['path'] { v } else if pos.len > 1 { pos[1] } else { return error('set requires path argument') }
+			data := if v := named['data'] { v } else if pos.len > 2 { pos[2] } else { return error('set requires data argument') }
+			return fn_set([value, path, data])
+		}
+		'log' {
+			return VrlValue(VrlNull{})
+		}
+		'match' {
+			value := if v := named['value'] { v } else if pos.len > 0 { pos[0] } else { return error('match requires value argument') }
+			pattern := if v := named['pattern'] { v } else if pos.len > 1 { pos[1] } else { return error('match requires pattern argument') }
+			return fn_match([value, pattern])
+		}
+		'match_any' {
+			value := if v := named['value'] { v } else if pos.len > 0 { pos[0] } else { return error('match_any requires value argument') }
+			patterns := if v := named['patterns'] { v } else if pos.len > 1 { pos[1] } else { return error('match_any requires patterns argument') }
+			return fn_match_any([value, patterns])
+		}
+		'includes' {
+			value := if v := named['value'] { v } else if pos.len > 0 { pos[0] } else { return error('includes requires value argument') }
+			item := if v := named['item'] { v } else if pos.len > 1 { pos[1] } else { return error('includes requires item argument') }
+			return fn_includes([value, item])
+		}
+		'unique' {
+			value := if v := named['value'] { v } else if pos.len > 0 { pos[0] } else { return error('unique requires value argument') }
+			return fn_unique([value])
+		}
 		else {
 			// Fallback: pass all positional args to the general dispatch
 			mut all_args := pos.clone()
@@ -206,9 +260,17 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'to_bool', 'bool' { return fn_to_bool(args) }
 		'string' { return fn_string(args) }
 		'is_nullish' { return fn_is_nullish(args) }
+		'is_string' { return fn_is_type(args, 'string') }
+		'is_integer' { return fn_is_type(args, 'integer') }
+		'is_float' { return fn_is_type(args, 'float') }
+		'is_boolean' { return fn_is_type(args, 'boolean') }
+		'is_null' { return fn_is_type(args, 'null') }
+		'is_array' { return fn_is_type(args, 'array') }
+		'is_object' { return fn_is_type(args, 'object') }
 		'keys' { return fn_keys(args) }
 		'values' { return fn_values(args) }
 		'flatten' { return fn_flatten(args) }
+		'unflatten' { return fn_unflatten(args) }
 		'merge' { return fn_merge(args) }
 		'compact' { return fn_compact(args) }
 		'push' { return fn_push(args) }
@@ -221,6 +283,27 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'round' { return fn_round(args) }
 		'mod' { return fn_mod(args) }
 		'format_number' { return fn_format_number(args) }
+		'match' { return fn_match(args) }
+		'match_any' { return fn_match_any(args) }
+		'includes' { return fn_includes(args) }
+		'contains_all' { return fn_contains_all(args) }
+		'find' { return fn_find(args) }
+		'get' { return fn_get(args) }
+		'set' { return fn_set(args) }
+		'unique' { return fn_unique(args) }
+		'pop' { return fn_pop(args) }
+		'to_regex' { return fn_to_regex(args) }
+		'from_unix_timestamp' { return fn_from_unix_timestamp(args) }
+		'to_unix_timestamp' { return fn_to_unix_timestamp(args) }
+		'type_def' { return fn_type_def(args) }
+		'assert' { return fn_assert(args) }
+		'assert_eq' { return fn_assert_eq(args) }
+		'array' { return fn_ensure_array(args) }
+		'object' { return fn_ensure_object(args) }
+		'log' { return VrlValue(VrlNull{}) }
+		'now' { return VrlValue(Timestamp{t: time.now()}) }
+		'uuid_v4' { return fn_uuid_v4() }
+		'get_env_var' { return fn_get_env_var(args) }
 		else { return error('unknown function: ${name}') }
 	}
 }
@@ -248,6 +331,8 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 	if name == 'exists' { return rt.fn_exists(expr) }
 	if name == 'filter' { return rt.fn_filter(expr) }
 	if name == 'for_each' { return rt.fn_for_each(expr) }
+	if name == 'map_keys' { return rt.fn_map_keys(expr) }
+	if name == 'map_values' { return rt.fn_map_values(expr) }
 
 	// If any args are named, use named-arg dispatch
 	has_named := expr.arg_names.len > 0 && expr.arg_names.any(it.len > 0)
@@ -279,7 +364,8 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'to_float', 'float' { return fn_to_float([a0]) }
 			'to_bool', 'bool' { return fn_to_bool([a0]) }
 			'string' { return fn_string([a0]) }
-			'length', 'strlen' { return fn_length([a0]) }
+			'length' { return fn_length([a0]) }
+			'strlen' { return fn_strlen([a0]) }
 			'strip_whitespace', 'trim' { return fn_strip_whitespace([a0]) }
 			'is_string' { return VrlValue(a0 is string) }
 			'is_integer' { return VrlValue(a0 is int) }
@@ -303,7 +389,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'type_def' { return fn_type_def([a0]) }
 			'array' { return fn_ensure_array([a0]) }
 			'object' { return fn_ensure_object([a0]) }
-			'map_keys', 'map_values' { return a0 }
+			// map_keys and map_values are handled above as special functions
 			else {}
 		}
 		// Fall through to 2-arg path or general path
@@ -372,8 +458,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		'compact' { return fn_compact(args) }
 		'push' { return fn_push(args) }
 		'append' { return fn_append(args) }
-		'map_keys' { return fn_first_arg(args) }
-		'map_values' { return fn_first_arg(args) }
+		// map_keys and map_values handled as special functions above
 		'encode_json' { return fn_encode_json(args) }
 		'decode_json', 'parse_json' { return fn_decode_json(args) }
 		'abs' { return fn_abs(args) }
@@ -740,7 +825,7 @@ fn fn_strlen(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('strlen requires 1 argument') }
 	a := args[0]
 	match a {
-		string { return VrlValue(a.len) }
+		string { return VrlValue(a.runes().len) }
 		else { return error('strlen requires a string') }
 	}
 }
@@ -1068,6 +1153,15 @@ fn flatten_array(arr []VrlValue, mut result []VrlValue) {
 
 fn fn_unflatten(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('unflatten requires 1 argument') }
+	sep := if args.len > 1 {
+		a1 := args[1]
+		match a1 {
+			string { a1 }
+			else { '.' }
+		}
+	} else {
+		'.'
+	}
 	a := args[0]
 	match a {
 		ObjectMap {
@@ -1075,28 +1169,43 @@ fn fn_unflatten(args []VrlValue) !VrlValue {
 			all_keys := a.keys()
 			for k in all_keys {
 				v := a.get(k) or { VrlValue(VrlNull{}) }
-				parts := k.split('.')
-				if parts.len == 1 {
-					result.set(k, v)
-				} else {
-					if !result.has(parts[0]) {
-						result.set(parts[0], VrlValue(new_object_map()))
-					}
-					existing := result.get(parts[0]) or { VrlValue(new_object_map()) }
-					e := existing
-					match e {
-						ObjectMap {
-							mut m := e.clone_map()
-							m.set(parts[1..].join('.'), v)
-							result.set(parts[0], VrlValue(m))
-						}
-						else {}
-					}
-				}
+				unflatten_set_nested(mut result, k, v, sep)
 			}
 			return VrlValue(result)
 		}
 		else { return error('unflatten requires an object') }
+	}
+}
+
+// unflatten_set_nested sets a value in a nested object map using a dotted key path.
+fn unflatten_set_nested(mut obj ObjectMap, key string, val VrlValue, sep string) {
+	parts := key.split(sep)
+	if parts.len <= 1 {
+		obj.set(key, val)
+		return
+	}
+	// Handle first part, recursively nest into it
+	first := parts[0]
+	remaining := parts[1..].join(sep)
+	if obj.has(first) {
+		existing := obj.get(first) or { VrlValue(new_object_map()) }
+		e := existing
+		match e {
+			ObjectMap {
+				mut m := e.clone_map()
+				unflatten_set_nested(mut m, remaining, val, sep)
+				obj.set(first, VrlValue(m))
+			}
+			else {
+				mut m := new_object_map()
+				unflatten_set_nested(mut m, remaining, val, sep)
+				obj.set(first, VrlValue(m))
+			}
+		}
+	} else {
+		mut m := new_object_map()
+		unflatten_set_nested(mut m, remaining, val, sep)
+		obj.set(first, VrlValue(m))
 	}
 }
 
@@ -1233,12 +1342,37 @@ fn fn_first_arg(args []VrlValue) !VrlValue {
 	return args[0]
 }
 
+// save_closure_params saves the current values of closure parameter variables and returns them.
+fn (rt Runtime) save_closure_params(params []string) map[string]VrlValue {
+	mut saved := map[string]VrlValue{}
+	for p in params {
+		name := p.trim_left('_')
+		if v := rt.vars.get(name) {
+			saved[name] = v
+		}
+	}
+	return saved
+}
+
+// restore_closure_params restores saved closure parameter variables.
+fn (mut rt Runtime) restore_closure_params(saved map[string]VrlValue, params []string) {
+	for p in params {
+		name := p.trim_left('_')
+		if v := saved[name] {
+			rt.vars.set(name, v)
+		} else {
+			rt.vars.delete(name)
+		}
+	}
+}
+
 fn (mut rt Runtime) fn_filter(expr FnCallExpr) !VrlValue {
 	if expr.args.len < 1 { return error('filter requires 1 argument') }
 	container := rt.eval(expr.args[0])!
 	if expr.closure.len == 0 { return container }
 	closure_expr := expr.closure[0]
 	if closure_expr is ClosureExpr {
+		saved := rt.save_closure_params(closure_expr.params)
 		c := container
 		match c {
 			[]VrlValue {
@@ -1248,11 +1382,29 @@ fn (mut rt Runtime) fn_filter(expr FnCallExpr) !VrlValue {
 						rt.vars.set(closure_expr.params[0].trim_left('_'), VrlValue(i))
 					}
 					if closure_expr.params.len > 1 {
-						rt.vars.set(closure_expr.params[1], item)
+						rt.vars.set(closure_expr.params[1].trim_left('_'), item)
 					}
 					cond := rt.eval(closure_expr.body[0])!
 					if is_truthy(cond) { result << item }
 				}
+				rt.restore_closure_params(saved, closure_expr.params)
+				return VrlValue(result)
+			}
+			ObjectMap {
+				mut result := new_object_map()
+				all_keys := c.keys()
+				for k in all_keys {
+					val := c.get(k) or { VrlValue(VrlNull{}) }
+					if closure_expr.params.len > 0 {
+						rt.vars.set(closure_expr.params[0].trim_left('_'), VrlValue(k))
+					}
+					if closure_expr.params.len > 1 {
+						rt.vars.set(closure_expr.params[1].trim_left('_'), val)
+					}
+					cond := rt.eval(closure_expr.body[0])!
+					if is_truthy(cond) { result.set(k, val) }
+				}
+				rt.restore_closure_params(saved, closure_expr.params)
 				return VrlValue(result)
 			}
 			else { return container }
@@ -1267,6 +1419,7 @@ fn (mut rt Runtime) fn_for_each(expr FnCallExpr) !VrlValue {
 	if expr.closure.len == 0 { return VrlValue(VrlNull{}) }
 	closure_expr := expr.closure[0]
 	if closure_expr is ClosureExpr {
+		saved := rt.save_closure_params(closure_expr.params)
 		c := container
 		match c {
 			[]VrlValue {
@@ -1275,15 +1428,195 @@ fn (mut rt Runtime) fn_for_each(expr FnCallExpr) !VrlValue {
 						rt.vars.set(closure_expr.params[0].trim_left('_'), VrlValue(i))
 					}
 					if closure_expr.params.len > 1 {
-						rt.vars.set(closure_expr.params[1], item)
+						rt.vars.set(closure_expr.params[1].trim_left('_'), item)
+					}
+					rt.eval(closure_expr.body[0])!
+				}
+			}
+			ObjectMap {
+				all_keys := c.keys()
+				for k in all_keys {
+					val := c.get(k) or { VrlValue(VrlNull{}) }
+					if closure_expr.params.len > 0 {
+						rt.vars.set(closure_expr.params[0].trim_left('_'), VrlValue(k))
+					}
+					if closure_expr.params.len > 1 {
+						rt.vars.set(closure_expr.params[1].trim_left('_'), val)
 					}
 					rt.eval(closure_expr.body[0])!
 				}
 			}
 			else {}
 		}
+		rt.restore_closure_params(saved, closure_expr.params)
 	}
 	return VrlValue(VrlNull{})
+}
+
+fn (mut rt Runtime) fn_map_keys(expr FnCallExpr) !VrlValue {
+	if expr.args.len < 1 { return error('map_keys requires 1 argument') }
+	// Check for recursive named arg
+	has_named := expr.arg_names.len > 0 && expr.arg_names.any(it.len > 0)
+	mut recursive := false
+	if has_named {
+		for i, an in expr.arg_names {
+			if an == 'recursive' {
+				rv := rt.eval(expr.args[i])!
+				r := rv
+				match r {
+					bool { recursive = r }
+					else {}
+				}
+			}
+		}
+	}
+	// Find the positional argument (first non-named arg)
+	mut container_idx := 0
+	for i, an in expr.arg_names {
+		if an.len == 0 {
+			container_idx = i
+			break
+		}
+	}
+	container := rt.eval(expr.args[container_idx])!
+	if expr.closure.len == 0 { return container }
+	closure_expr := expr.closure[0]
+	if closure_expr is ClosureExpr {
+		return rt.map_keys_impl(container, closure_expr, recursive)
+	}
+	return container
+}
+
+fn (mut rt Runtime) map_keys_impl(container VrlValue, closure_expr ClosureExpr, recursive bool) !VrlValue {
+	c := container
+	match c {
+		ObjectMap {
+			saved := rt.save_closure_params(closure_expr.params)
+			mut result := new_object_map()
+			all_keys := c.keys()
+			for k in all_keys {
+				val := c.get(k) or { VrlValue(VrlNull{}) }
+				if closure_expr.params.len > 0 {
+					rt.vars.set(closure_expr.params[0].trim_left('_'), VrlValue(k))
+				}
+				new_key := rt.eval(closure_expr.body[0])!
+				nk := new_key
+				final_key := match nk {
+					string { nk }
+					else { k }
+				}
+				if recursive {
+					result.set(final_key, rt.map_keys_impl(val, closure_expr, true)!)
+				} else {
+					result.set(final_key, val)
+				}
+			}
+			rt.restore_closure_params(saved, closure_expr.params)
+			return VrlValue(result)
+		}
+		[]VrlValue {
+			if recursive {
+				mut result := []VrlValue{}
+				for item in c {
+					result << rt.map_keys_impl(item, closure_expr, true)!
+				}
+				return VrlValue(result)
+			}
+			return container
+		}
+		else { return container }
+	}
+}
+
+fn (mut rt Runtime) fn_map_values(expr FnCallExpr) !VrlValue {
+	if expr.args.len < 1 { return error('map_values requires 1 argument') }
+	// Check for recursive named arg
+	has_named := expr.arg_names.len > 0 && expr.arg_names.any(it.len > 0)
+	mut recursive := false
+	if has_named {
+		for i, an in expr.arg_names {
+			if an == 'recursive' {
+				rv := rt.eval(expr.args[i])!
+				r := rv
+				match r {
+					bool { recursive = r }
+					else {}
+				}
+			}
+		}
+	}
+	mut container_idx := 0
+	for i, an in expr.arg_names {
+		if an.len == 0 {
+			container_idx = i
+			break
+		}
+	}
+	container := rt.eval(expr.args[container_idx])!
+	if expr.closure.len == 0 { return container }
+	closure_expr := expr.closure[0]
+	if closure_expr is ClosureExpr {
+		return rt.map_values_impl(container, closure_expr, recursive)
+	}
+	return container
+}
+
+fn (mut rt Runtime) map_values_impl(container VrlValue, closure_expr ClosureExpr, recursive bool) !VrlValue {
+	c := container
+	match c {
+		ObjectMap {
+			saved := rt.save_closure_params(closure_expr.params)
+			mut result := new_object_map()
+			all_keys := c.keys()
+			for k in all_keys {
+				val := c.get(k) or { VrlValue(VrlNull{}) }
+				if recursive {
+					// For recursive, only apply closure to leaf values
+					v := val
+					match v {
+						ObjectMap {
+							result.set(k, rt.map_values_impl(val, closure_expr, true)!)
+							continue
+						}
+						[]VrlValue {
+							result.set(k, rt.map_values_impl(val, closure_expr, true)!)
+							continue
+						}
+						else {}
+					}
+				}
+				if closure_expr.params.len > 0 {
+					rt.vars.set(closure_expr.params[0].trim_left('_'), val)
+				}
+				new_val := rt.eval(closure_expr.body[0])!
+				result.set(k, new_val)
+			}
+			rt.restore_closure_params(saved, closure_expr.params)
+			return VrlValue(result)
+		}
+		[]VrlValue {
+			if recursive {
+				mut result := []VrlValue{}
+				for item in c {
+					result << rt.map_values_impl(item, closure_expr, recursive)!
+				}
+				return VrlValue(result)
+			}
+			// Apply closure to each element
+			saved := rt.save_closure_params(closure_expr.params)
+			mut result := []VrlValue{}
+			for item in c {
+				if closure_expr.params.len > 0 {
+					rt.vars.set(closure_expr.params[0].trim_left('_'), item)
+				}
+				new_val := rt.eval(closure_expr.body[0])!
+				result << new_val
+			}
+			rt.restore_closure_params(saved, closure_expr.params)
+			return VrlValue(result)
+		}
+		else { return container }
+	}
 }
 
 fn fn_encode_json(args []VrlValue) !VrlValue {
@@ -1373,7 +1706,7 @@ fn parse_json_recursive(s string) !VrlValue {
 	if trimmed.starts_with('"') && trimmed.ends_with('"') {
 		end := trimmed.len - 1
 		inner := trimmed[1..end]
-		return VrlValue(inner)
+		return VrlValue(unescape_json_string(inner))
 	}
 	if trimmed[0].is_digit() || (trimmed[0] == `-` && trimmed.len > 1) {
 		if trimmed.contains('.') {
@@ -1464,6 +1797,81 @@ fn split_json_top_level(s string) []string {
 		parts << s[start..]
 	}
 	return parts
+}
+
+// unescape_json_string processes JSON escape sequences in a string.
+fn unescape_json_string(s string) string {
+	if !s.contains('\\') {
+		return s
+	}
+	mut result := []u8{cap: s.len}
+	mut i := 0
+	for i < s.len {
+		if s[i] == `\\` && i + 1 < s.len {
+			i++
+			match s[i] {
+				`"` { result << `"` }
+				`\\` { result << `\\` }
+				`/` { result << `/` }
+				`n` { result << `\n` }
+				`t` { result << `\t` }
+				`r` { result << `\r` }
+				`b` { result << 0x08 }
+				`f` { result << 0x0c }
+				`u` {
+					// Unicode escape \uXXXX
+					if i + 4 < s.len {
+						hex := s[i + 1..i + 5]
+						code := u32(0)
+						mut valid := true
+						mut cp := u32(0)
+						for h in hex.bytes() {
+							cp <<= 4
+							if h >= `0` && h <= `9` {
+								cp |= u32(h - `0`)
+							} else if h >= `a` && h <= `f` {
+								cp |= u32(h - `a` + 10)
+							} else if h >= `A` && h <= `F` {
+								cp |= u32(h - `A` + 10)
+							} else {
+								valid = false
+								break
+							}
+						}
+						_ = code
+						if valid {
+							// Encode as UTF-8
+							if cp < 0x80 {
+								result << u8(cp)
+							} else if cp < 0x800 {
+								result << u8(0xC0 | (cp >> 6))
+								result << u8(0x80 | (cp & 0x3F))
+							} else {
+								result << u8(0xE0 | (cp >> 12))
+								result << u8(0x80 | ((cp >> 6) & 0x3F))
+								result << u8(0x80 | (cp & 0x3F))
+							}
+							i += 4
+						} else {
+							result << `\\`
+							result << `u`
+						}
+					} else {
+						result << `\\`
+						result << `u`
+					}
+				}
+				else {
+					result << `\\`
+					result << s[i]
+				}
+			}
+		} else {
+			result << s[i]
+		}
+		i++
+	}
+	return result.bytestr()
 }
 
 // Math functions
@@ -1677,8 +2085,9 @@ fn fn_contains_all(args []VrlValue) !VrlValue {
 	if args.len < 2 { return error('contains_all requires 2 arguments') }
 	a0 := args[0]
 	a1 := args[1]
+	cs := if args.len > 2 { get_bool_arg(args[2], true) } else { true }
 	s := match a0 {
-		string { a0 }
+		string { if cs { a0 } else { a0.to_lower() } }
 		else { return error('contains_all first arg must be string') }
 	}
 	needles := match a1 {
@@ -1687,7 +2096,7 @@ fn fn_contains_all(args []VrlValue) !VrlValue {
 	}
 	for needle in needles {
 		n := match needle {
-			string { needle }
+			string { if cs { needle } else { needle.to_lower() } }
 			else { continue }
 		}
 		if !s.contains(n) { return VrlValue(false) }
@@ -1703,60 +2112,92 @@ fn fn_find(args []VrlValue) !VrlValue {
 		string { a0 }
 		else { return error('find first arg must be string') }
 	}
-	pattern := match a1 {
-		string { a1 }
-		else { return error('find second arg must be string') }
+	from := if args.len > 2 {
+		a2 := args[2]
+		match a2 {
+			int { a2 }
+			else { 0 }
+		}
+	} else {
+		0
 	}
-	idx := s.index(pattern) or { return VrlValue(-1) }
-	return VrlValue(idx)
+	search_str := if from > 0 && from < s.len { s[from..] } else { s }
+	a1v := a1
+	match a1v {
+		VrlRegex {
+			re := pcre.compile(a1v.pattern) or { return VrlValue(VrlNull{}) }
+			if m := re.find(search_str) {
+				return VrlValue(m.start + from)
+			}
+			return VrlValue(VrlNull{})
+		}
+		string {
+			idx := search_str.index(a1v) or { return VrlValue(VrlNull{}) }
+			return VrlValue(idx + from)
+		}
+		else { return error('find second arg must be string or regex') }
+	}
 }
 
 fn fn_get(args []VrlValue) !VrlValue {
 	if args.len < 2 { return error('get requires 2 arguments') }
 	container := args[0]
 	path := args[1]
+	// Convert path to array of segments
+	segments := get_path_segments(path)
+	return get_nested(container, segments)
+}
+
+fn get_path_segments(path VrlValue) []VrlValue {
+	p := path
+	match p {
+		[]VrlValue { return p }
+		string {
+			parts := p.split('.')
+			mut result := []VrlValue{}
+			for part in parts {
+				result << VrlValue(part)
+			}
+			return result
+		}
+		else { return [path] }
+	}
+}
+
+fn get_nested(container VrlValue, segments []VrlValue) !VrlValue {
+	if segments.len == 0 { return container }
 	c := container
+	seg := segments[0]
+	rest := segments[1..]
 	match c {
 		ObjectMap {
-			p := path
-			match p {
-				string {
-					// Support dotted paths
-					parts := (p as string).split('.')
-					mut current := VrlValue(c)
-					for part in parts {
-						cur := current
-						match cur {
-							ObjectMap {
-								current = cur.get(part) or { return VrlValue(VrlNull{}) }
-							}
-							else { return VrlValue(VrlNull{}) }
-						}
-					}
-					return current
-				}
-				[]VrlValue {
-					if p.len > 0 {
-						first := p[0]
-						match first {
-							string { return c.get(first) or { VrlValue(VrlNull{}) } }
-							else { return VrlValue(VrlNull{}) }
-						}
-					}
-					return VrlValue(VrlNull{})
-				}
+			s := seg
+			key := match s {
+				string { s }
+				int { '${s}' }
 				else { return VrlValue(VrlNull{}) }
 			}
+			val := c.get(key) or { return VrlValue(VrlNull{}) }
+			return get_nested(val, rest)
 		}
 		[]VrlValue {
-			match path {
-				int {
-					idx := if path < 0 { c.len + path } else { path }
-					if idx >= 0 && idx < c.len { return c[idx] }
-					return VrlValue(VrlNull{})
+			s := seg
+			idx := match s {
+				int { if s < 0 { c.len + s } else { s } }
+				string {
+					// Only numeric strings are valid array indices
+					if s.len > 0 && (s[0].is_digit() || (s[0] == `-` && s.len > 1)) {
+						s.int()
+					} else {
+						return VrlValue(VrlNull{})
+					}
 				}
 				else { return VrlValue(VrlNull{}) }
 			}
+			if idx >= 0 && idx < c.len {
+				return get_nested(c[idx], rest)
+			}
+			return VrlValue(VrlNull{})
 		}
 		else { return VrlValue(VrlNull{}) }
 	}
@@ -1764,8 +2205,101 @@ fn fn_get(args []VrlValue) !VrlValue {
 
 fn fn_set(args []VrlValue) !VrlValue {
 	if args.len < 3 { return error('set requires 3 arguments') }
-	// set(object, path, value) - simplified implementation
-	return args[0]
+	container := args[0]
+	path := args[1]
+	value := args[2]
+	segments := get_path_segments(path)
+	return set_nested(container, segments, value)
+}
+
+fn set_nested(container VrlValue, segments []VrlValue, value VrlValue) !VrlValue {
+	if segments.len == 0 { return value }
+	c := container
+	seg := segments[0]
+	rest := segments[1..]
+	match c {
+		ObjectMap {
+			s := seg
+			key := match s {
+				string { s }
+				int { '${s}' }
+				else { return container }
+			}
+			existing := c.get(key) or { VrlValue(VrlNull{}) }
+			new_val := set_nested(existing, rest, value)!
+			mut result := c.clone_map()
+			result.set(key, new_val)
+			return VrlValue(result)
+		}
+		[]VrlValue {
+			s := seg
+			// Check if the segment is a non-numeric string - treat as object key
+			is_string_key := match s {
+				string {
+					!(s.len > 0 && (s[0].is_digit() || (s[0] == `-` && s.len > 1)))
+				}
+				else { false }
+			}
+			if is_string_key {
+				// Convert to object-based set
+				mut obj := new_object_map()
+				sk := s as string
+				new_val := set_nested(VrlValue(VrlNull{}), rest, value)!
+				obj.set(sk, new_val)
+				return VrlValue(obj)
+			}
+			idx := match s {
+				int { s }
+				string { s.int() }
+				else { return container }
+			}
+			actual_idx := if idx < 0 { c.len + idx } else { idx }
+			if rest.len == 0 {
+				mut result := c.clone()
+				for result.len <= actual_idx {
+					result << VrlValue(VrlNull{})
+				}
+				if actual_idx >= 0 && actual_idx < result.len {
+					result[actual_idx] = value
+				}
+				return VrlValue(result)
+			}
+			existing := if actual_idx >= 0 && actual_idx < c.len { c[actual_idx] } else { VrlValue(VrlNull{}) }
+			new_val := set_nested(existing, rest, value)!
+			mut result := c.clone()
+			for result.len <= actual_idx {
+				result << VrlValue(VrlNull{})
+			}
+			if actual_idx >= 0 {
+				result[actual_idx] = new_val
+			}
+			return VrlValue(result)
+		}
+		VrlNull {
+			// Auto-create structure
+			s := seg
+			match s {
+				string {
+					mut obj := new_object_map()
+					new_val := set_nested(VrlValue(VrlNull{}), rest, value)!
+					obj.set(s, new_val)
+					return VrlValue(obj)
+				}
+				int {
+					mut arr := []VrlValue{}
+					idx := if s < 0 { 0 } else { s }
+					for arr.len <= idx {
+						arr << VrlValue(VrlNull{})
+					}
+					new_val := set_nested(VrlValue(VrlNull{}), rest, value)!
+					arr[idx] = new_val
+					return VrlValue(arr)
+				}
+				else { return value }
+			}
+		}
+		else { return value }
+	}
 }
 
 fn fn_unique(args []VrlValue) !VrlValue {
