@@ -55,7 +55,7 @@ fn fn_is_json(args []VrlValue) !VrlValue {
 			return VrlValue(r is string)
 		}
 		'number' {
-			return VrlValue(r is int || r is f64)
+			return VrlValue(r is i64 || r is f64)
 		}
 		'bool' {
 			return VrlValue(r is bool)
@@ -115,7 +115,7 @@ fn tag_types_ext(v VrlValue) !VrlValue {
 			obj.set(vrl_type_name(v), v)
 			return VrlValue(obj)
 		}
-		int {
+		i64 {
 			mut obj := new_object_map()
 			obj.set('integer', v)
 			return VrlValue(obj)

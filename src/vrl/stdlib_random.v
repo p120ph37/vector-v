@@ -11,11 +11,11 @@ fn fn_random_int(args []VrlValue) !VrlValue {
 	a0 := args[0]
 	a1 := args[1]
 	min := match a0 {
-		int { a0 }
+		i64 { a0 }
 		else { return error('random_int min must be integer') }
 	}
 	max := match a1 {
-		int { a1 }
+		i64 { a1 }
 		else { return error('random_int max must be integer') }
 	}
 	if min > max {
@@ -24,8 +24,8 @@ fn fn_random_int(args []VrlValue) !VrlValue {
 	if min == max {
 		return VrlValue(min)
 	}
-	val := rand.int_in_range(min, max + 1) or { min }
-	return VrlValue(val)
+	val := rand.int_in_range(int(min), int(max + 1)) or { int(min) }
+	return VrlValue(i64(val))
 }
 
 // random_float(min, max)
@@ -37,12 +37,12 @@ fn fn_random_float(args []VrlValue) !VrlValue {
 	a1 := args[1]
 	min := match a0 {
 		f64 { a0 }
-		int { f64(a0) }
+		i64 { f64(a0) }
 		else { return error('random_float min must be number') }
 	}
 	max := match a1 {
 		f64 { a1 }
-		int { f64(a1) }
+		i64 { f64(a1) }
 		else { return error('random_float max must be number') }
 	}
 	if min > max {
@@ -64,14 +64,14 @@ fn fn_random_bytes(args []VrlValue) !VrlValue {
 	}
 	a := args[0]
 	length := match a {
-		int { a }
+		i64 { a }
 		else { return error('random_bytes requires an integer') }
 	}
 	if length < 0 {
 		return error('length must be non-negative')
 	}
-	mut bytes := []u8{len: length}
-	for i in 0 .. length {
+	mut bytes := []u8{len: int(length)}
+	for i in 0 .. int(length) {
 		bytes[i] = u8(rand.intn(256) or { 0 })
 	}
 	return VrlValue(bytes.bytestr())
@@ -84,7 +84,20 @@ fn fn_uuid_v7(args []VrlValue) !VrlValue {
 		a := args[0]
 		match a {
 			Timestamp {
-				ts_ms = a.t.unix_micro() / 1000
+				if rust_vrl_compat {
+					// Reproduce Rust VRL's quirk: chrono's timestamp_nanos_opt()
+					// returns total nanoseconds since epoch as i64, then the code
+					// casts it to u32 (truncating), and passes it to
+					// uuid::Timestamp::from_unix(NoContext, seconds, nanos_as_u32).
+					// The uuid crate interprets that as sub-second nanoseconds,
+					// so the truncated value shifts the millisecond timestamp.
+					secs := i64(a.t.unix())
+					total_nanos := a.t.unix_micro() * 1000
+					truncated_nanos := u32(total_nanos)
+					ts_ms = secs * 1000 + i64(truncated_nanos) / 1_000_000
+				} else {
+					ts_ms = a.t.unix_micro() / 1000
+				}
 			}
 			else {
 				return error('uuid_v7 timestamp must be a timestamp')

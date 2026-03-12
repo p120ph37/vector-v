@@ -6,7 +6,7 @@ import time
 // VrlValue represents a VRL value at runtime.
 // Mirrors VRL's Value enum: Bytes, Integer, Float, Boolean, Object, Array, Timestamp, Regex, Null.
 pub type VrlValue = string
-	| int
+	| i64
 	| f64
 	| bool
 	| []VrlValue
@@ -36,7 +36,7 @@ pub fn vrl_to_string(v VrlValue) string {
 		string {
 			return v
 		}
-		int {
+		i64 {
 			return '${v}'
 		}
 		f64 {
@@ -63,11 +63,64 @@ pub fn vrl_to_string(v VrlValue) string {
 	}
 }
 
-// format_timestamp formats a time.Time as RFC3339 with Z suffix for UTC.
+// format_timestamp formats a time.Time as RFC3339 matching Rust chrono's
+// to_rfc3339_opts(SecondsFormat::AutoSi, true): uses 0, 3, 6, or 9 fractional
+// digits — the minimum needed to represent the stored precision without
+// trailing zeros.  V's time.Time stores microsecond precision, so we emit
+// up to 6 digits.
 fn format_timestamp(t time.Time) string {
-	s := t.format_rfc3339()
-	// Strip .000 milliseconds if zero (e.g., "2021-02-02T19:41:00.000Z" → "2021-02-02T19:41:00Z")
-	return s.replace('.000Z', 'Z').replace('.000+', '+').replace('.000-', '-')
+	micro := t.unix_micro()
+	frac_us := micro % 1_000_000
+	// Normalize negative fractional part
+	frac := if frac_us < 0 { frac_us + 1_000_000 } else { frac_us }
+
+	// Build date-time prefix: 2020-12-30T22:20:53
+	// We use V's format but replace its fractional handling with our own.
+	base := t.format_rfc3339()
+
+	// Find the 'T' separator to get the date-time prefix without fractional part
+	// V's format_rfc3339 produces e.g. "2020-12-30T22:20:53.824Z"
+	// We need to strip from '.' onwards and rebuild
+	mut dt := ''
+	mut suffix := 'Z'
+	dot_idx := base.index('.') or { -1 }
+	if dot_idx >= 0 {
+		dt = base[..dot_idx]
+		// Find timezone suffix after fractional digits
+		rest := base[dot_idx + 1..]
+		for i, c in rest {
+			if c == `Z` || c == `+` || c == `-` {
+				suffix = rest[i..]
+				break
+			}
+		}
+	} else {
+		// No fractional part in V's output
+		// Strip trailing Z/+offset
+		if base.ends_with('Z') {
+			dt = base[..base.len - 1]
+			suffix = 'Z'
+		} else {
+			// Find +/- timezone offset
+			for i := base.len - 1; i >= 0; i-- {
+				if base[i] == `+` || (base[i] == `-` && i > 10) {
+					dt = base[..i]
+					suffix = base[i..]
+					break
+				}
+			}
+		}
+	}
+
+	// AutoSi: use minimum digits (0, 3, or 6) to represent precision
+	if frac == 0 {
+		return '${dt}${suffix}'
+	} else if frac % 1000 == 0 {
+		ms := frac / 1000
+		return '${dt}.${ms:03}${suffix}'
+	} else {
+		return '${dt}.${frac:06}${suffix}'
+	}
 }
 
 // format_float formats a float, stripping trailing zeros but keeping at least one decimal.
@@ -120,7 +173,7 @@ pub fn vrl_to_json(v VrlValue) string {
 		string {
 			return json.encode(v)
 		}
-		int {
+		i64 {
 			return '${v}'
 		}
 		f64 {
@@ -166,7 +219,7 @@ pub fn vrl_to_json_pretty(v VrlValue, indent int) string {
 	inner := '  '.repeat(indent + 1)
 	match v {
 		string { return json.encode(v) }
-		int { return '${v}' }
+		i64 { return '${v}' }
 		f64 { return format_float(v) }
 		bool { return if v { 'true' } else { 'false' } }
 		VrlNull { return 'null' }
@@ -203,7 +256,7 @@ pub fn is_truthy(v VrlValue) bool {
 		bool { return v }
 		VrlNull { return false }
 		string { return v.len > 0 }
-		int { return v != 0 }
+		i64 { return v != 0 }
 		f64 { return v != 0.0 }
 		else { return true }
 	}
@@ -212,9 +265,9 @@ pub fn is_truthy(v VrlValue) bool {
 // values_equal checks if two VrlValues are equal.
 pub fn values_equal(a VrlValue, b VrlValue) bool {
 	match a {
-		int {
+		i64 {
 			match b {
-				int { return a == b }
+				i64 { return a == b }
 				f64 { return f64(a) == b }
 				else { return false }
 			}
@@ -222,7 +275,7 @@ pub fn values_equal(a VrlValue, b VrlValue) bool {
 		f64 {
 			match b {
 				f64 { return a == b }
-				int { return a == f64(b) }
+				i64 { return a == f64(b) }
 				else { return false }
 			}
 		}

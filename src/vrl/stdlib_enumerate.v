@@ -18,15 +18,15 @@ fn fn_tally(args []VrlValue) !VrlValue {
 		if existing := result.get(key) {
 			e := existing
 			match e {
-				int {
+				i64 {
 					result.set(key, VrlValue(e + 1))
 				}
 				else {
-					result.set(key, VrlValue(1))
+					result.set(key, VrlValue(i64(1)))
 				}
 			}
 		} else {
-			result.set(key, VrlValue(1))
+			result.set(key, VrlValue(i64(1)))
 		}
 	}
 	return VrlValue(result)
@@ -49,7 +49,7 @@ fn fn_tally_value(args []VrlValue) !VrlValue {
 			count++
 		}
 	}
-	return VrlValue(count)
+	return VrlValue(i64(count))
 }
 
 // match_array(value, pattern)

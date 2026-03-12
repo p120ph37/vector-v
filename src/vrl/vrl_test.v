@@ -48,7 +48,7 @@ fn test_lexer_operators() {
 
 fn test_integer_arithmetic() {
 	result := execute('1 + 1', map[string]VrlValue{}) or { panic(err) }
-	assert result == VrlValue(2)
+	assert result == VrlValue(i64(2))
 }
 
 fn test_float_arithmetic() {
@@ -73,7 +73,7 @@ fn test_null_literal() {
 
 fn test_variable_assignment() {
 	result := execute('foo = 5\nfoo', map[string]VrlValue{}) or { panic(err) }
-	assert result == VrlValue(5)
+	assert result == VrlValue(i64(5))
 }
 
 fn test_path_access() {
@@ -93,8 +93,8 @@ fn test_path_assignment() {
 
 fn test_del_function() {
 	mut obj := map[string]VrlValue{}
-	obj['a'] = VrlValue(1)
-	obj['b'] = VrlValue(2)
+	obj['a'] = VrlValue(i64(1))
+	obj['b'] = VrlValue(i64(2))
 	result := execute('del(.a)\n.', obj) or { panic(err) }
 	json_str := vrl_to_json(result)
 	assert !json_str.contains('"a"')
@@ -165,7 +165,7 @@ fn test_contains() {
 
 fn test_to_int() {
 	result := execute('to_int!(true)', map[string]VrlValue{}) or { panic(err) }
-	assert result == VrlValue(1)
+	assert result == VrlValue(i64(1))
 }
 
 fn test_to_string() {
@@ -194,7 +194,7 @@ fn test_is_type_functions() {
 
 fn test_length() {
 	result := execute('length("hello")', map[string]VrlValue{}) or { panic(err) }
-	assert result == VrlValue(5)
+	assert result == VrlValue(i64(5))
 }
 
 fn test_error_coalescing() {
@@ -205,7 +205,7 @@ fn test_error_coalescing() {
 
 fn test_abs() {
 	result := execute('abs(-5)', map[string]VrlValue{}) or { panic(err) }
-	assert result == VrlValue(5)
+	assert result == VrlValue(i64(5))
 }
 
 fn test_merge_objects() {
@@ -218,7 +218,7 @@ fn test_merge_objects() {
 fn test_flatten_object() {
 	mut obj := map[string]VrlValue{}
 	mut inner := new_object_map()
-	inner.set('b', VrlValue(1))
+	inner.set('b', VrlValue(i64(1)))
 	obj['a'] = VrlValue(inner)
 	result := execute('flatten(.)', obj) or { panic(err) }
 	json_str := vrl_to_json(result)
@@ -244,7 +244,7 @@ fn test_compact_array() {
 
 fn test_multiplication() {
 	result := execute('3 * 4', map[string]VrlValue{}) or { panic(err) }
-	assert result == VrlValue(12)
+	assert result == VrlValue(i64(12))
 }
 
 fn test_division() {
@@ -254,21 +254,21 @@ fn test_division() {
 
 fn test_subtraction() {
 	result := execute('10 - 3', map[string]VrlValue{}) or { panic(err) }
-	assert result == VrlValue(7)
+	assert result == VrlValue(i64(7))
 }
 
 fn test_modulo() {
 	result := execute('10 % 3', map[string]VrlValue{}) or { panic(err) }
-	assert result == VrlValue(1)
+	assert result == VrlValue(i64(1))
 }
 
 fn test_nested_path_set_get() {
 	mut obj := map[string]VrlValue{}
 	mut inner := new_object_map()
-	inner.set('b', VrlValue(42))
+	inner.set('b', VrlValue(i64(42)))
 	obj['a'] = VrlValue(inner)
 	result := execute('.a.b', obj) or { panic(err) }
-	assert result == VrlValue(42)
+	assert result == VrlValue(i64(42))
 }
 
 fn test_not_operator() {

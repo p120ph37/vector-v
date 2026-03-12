@@ -65,7 +65,7 @@ fn type_from_value(v VrlValue) ObjectMap {
 	a := v
 	match a {
 		string { m.set('bytes', VrlValue(true)) }
-		int { m.set('integer', VrlValue(true)) }
+		i64 { m.set('integer', VrlValue(true)) }
 		f64 { m.set('float', VrlValue(true)) }
 		bool { m.set('boolean', VrlValue(true)) }
 		VrlNull { m.set('null', VrlValue(true)) }
@@ -376,7 +376,7 @@ fn infer_expr_type(expr Expr, mut env TypeEnv) ObjectMap {
 				LiteralExpr {
 					iv := idx_expr.value
 					match iv {
-						int {
+						i64 {
 							ai := arr_inner
 							match ai {
 								ObjectMap {
