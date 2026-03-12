@@ -131,7 +131,7 @@ pub fn (mut rt Runtime) eval(expr Expr) !VrlValue {
 		}
 		MergeAssignExpr {
 			val := rt.eval(expr.value[0])!
-			rt.merge_assign(expr.target[0], val)
+			rt.merge_assign(expr.target[0], val)!
 			return rt.eval(expr.target[0])
 		}
 		IndexExpr {
@@ -198,6 +198,11 @@ fn ok_err_default_value(expr Expr) VrlValue {
 			'to_float', 'to_unix_timestamp' { return VrlValue(f64(0)) }
 			'to_string', 'string' { return VrlValue('') }
 			'to_bool', 'bool' { return VrlValue(false) }
+			'push', 'append', 'flatten', 'compact', 'unique', 'filter',
+			'map_values', 'map_keys', 'keys', 'values', 'split' {
+				return VrlValue([]VrlValue{})
+			}
+			'merge' { return VrlValue(new_object_map()) }
 			else {}
 		}
 	}
@@ -555,19 +560,39 @@ fn set_in_container(container VrlValue, key VrlValue, val VrlValue) VrlValue {
 			match c {
 				[]VrlValue {
 					mut arr := c.clone()
-					mut idx := if k < 0 { arr.len + k } else { k }
-					if idx < 0 { idx = 0 }
-					// Extend array if needed
-					for idx >= arr.len {
+					if k < 0 {
+						mut idx := arr.len + k
+						if idx < 0 {
+							// Negative index beyond bounds: prepend nulls
+							// e.g. arr=[1,2,3], k=-4: idx=-1, prepend 1 null → [null,1,2,3], then set [0]=val
+							prepend_count := -idx
+							mut new_arr := []VrlValue{len: prepend_count, init: VrlValue(VrlNull{})}
+							for elem in arr {
+								new_arr << elem
+							}
+							new_arr[0] = val
+							return VrlValue(new_arr)
+						}
+						arr[idx] = val
+						return VrlValue(arr)
+					}
+					// Positive index: extend if needed
+					for k >= arr.len {
 						arr << VrlValue(VrlNull{})
 					}
-					arr[idx] = val
+					arr[k] = val
 					return VrlValue(arr)
 				}
 				else {
+					// Container is not an array — create one
+					if k < 0 {
+						target_len := if -k > 0 { -k } else { 1 }
+						mut arr := []VrlValue{len: target_len, init: VrlValue(VrlNull{})}
+						arr[0] = val
+						return VrlValue(arr)
+					}
 					mut arr := []VrlValue{}
-					idx := if k < 0 { 0 } else { k }
-					for _ in 0 .. idx {
+					for _ in 0 .. k {
 						arr << VrlValue(VrlNull{})
 					}
 					arr << val
@@ -588,6 +613,16 @@ fn (mut rt Runtime) set_nested_path(parts []string, val VrlValue) {
 	}
 	if parts.len == 2 {
 		top := parts[0]
+		// Check if second part is a numeric index
+		is_numeric := parts[1].len > 0
+			&& (parts[1][0].is_digit() || (parts[1][0] == `-` && parts[1].len > 1))
+		if is_numeric {
+			idx := parts[1].int()
+			existing := rt.object.get(top) or { VrlValue([]VrlValue{}) }
+			new_val := set_in_container(existing, VrlValue(idx), val)
+			rt.object.set(top, new_val)
+			return
+		}
 		if existing := rt.object.get(top) {
 			e := existing
 			match e {
@@ -596,6 +631,9 @@ fn (mut rt Runtime) set_nested_path(parts []string, val VrlValue) {
 					m.set(parts[1], val)
 					rt.object.set(top, VrlValue(m))
 					return
+				}
+				[]VrlValue {
+					// Can't set string key on array — treat as object
 				}
 				else {}
 			}
@@ -609,6 +647,22 @@ fn (mut rt Runtime) set_nested_path(parts []string, val VrlValue) {
 	rt.set_deep_path(parts, val)
 }
 
+fn is_numeric_segment(s string) bool {
+	if s.len == 0 {
+		return false
+	}
+	start := if s[0] == `-` { 1 } else { 0 }
+	if start >= s.len {
+		return false
+	}
+	for i in start .. s.len {
+		if !s[i].is_digit() {
+			return false
+		}
+	}
+	return true
+}
+
 fn (mut rt Runtime) set_deep_path(parts []string, val VrlValue) {
 	if parts.len == 0 {
 		return
@@ -617,31 +671,40 @@ fn (mut rt Runtime) set_deep_path(parts []string, val VrlValue) {
 		rt.object.set(parts[0], val)
 		return
 	}
-	// Build from inside out
+	// Build from inside out, handling numeric segments as array indices
 	mut current := val
 	mut i := parts.len - 1
 	for i >= 1 {
-		mut m := new_object_map()
-		m.set(parts[i], current)
-		current = VrlValue(m)
+		if is_numeric_segment(parts[i]) {
+			idx := parts[i].int()
+			current = set_in_container(VrlValue([]VrlValue{}), VrlValue(idx), current)
+		} else {
+			mut m := new_object_map()
+			m.set(parts[i], current)
+			current = VrlValue(m)
+		}
 		i--
 	}
 	rt.object.set(parts[0], current)
 }
 
-fn (mut rt Runtime) merge_assign(target Expr, val VrlValue) {
+fn (mut rt Runtime) merge_assign(target Expr, val VrlValue) ! {
+	v := val
+	if v !is ObjectMap {
+		return error('only objects can be merged')
+	}
 	if target is PathExpr {
 		if target.path == '.' {
-			v := val
-			match v {
+			vo := val
+			match vo {
 				ObjectMap {
-					if v.is_large {
-						for k, item in v.hm {
+					if vo.is_large {
+						for k, item in vo.hm {
 							rt.object.set(k, item)
 						}
 					} else {
-						for i in 0 .. v.ks.len {
-							rt.object.set(v.ks[i], v.vs[i])
+						for i in 0 .. vo.ks.len {
+							rt.object.set(vo.ks[i], vo.vs[i])
 						}
 					}
 				}
@@ -650,12 +713,17 @@ fn (mut rt Runtime) merge_assign(target Expr, val VrlValue) {
 		} else {
 			// Non-root path: merge val into existing object at path
 			existing := rt.get_path(target.path) or { VrlValue(new_object_map()) }
-			merged := fn_merge([existing, val]) or { return }
+			merged := fn_merge([existing, val])!
 			rt.assign_to(target, merged)
 		}
 	} else if target is IdentExpr {
 		existing := rt.vars.get(target.name) or { VrlValue(new_object_map()) }
-		merged := fn_merge([existing, val]) or { return }
+		// Check that existing is also an object
+		e := existing
+		if e !is ObjectMap {
+			return error('only objects can be merged')
+		}
+		merged := fn_merge([existing, val])!
 		rt.vars.set(target.name, merged)
 	}
 }
