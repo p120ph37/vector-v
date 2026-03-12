@@ -1385,6 +1385,7 @@ fn (mut rt Runtime) fn_filter(expr FnCallExpr) !VrlValue {
 						rt.vars.set(closure_expr.params[1].trim_left('_'), item)
 					}
 					cond := rt.eval(closure_expr.body[0])!
+					if rt.returned { rt.returned = false }
 					if is_truthy(cond) { result << item }
 				}
 				rt.restore_closure_params(saved, closure_expr.params)
@@ -1392,7 +1393,8 @@ fn (mut rt Runtime) fn_filter(expr FnCallExpr) !VrlValue {
 			}
 			ObjectMap {
 				mut result := new_object_map()
-				all_keys := c.keys()
+				mut all_keys := c.keys()
+				all_keys.sort()
 				for k in all_keys {
 					val := c.get(k) or { VrlValue(VrlNull{}) }
 					if closure_expr.params.len > 0 {
@@ -1402,6 +1404,7 @@ fn (mut rt Runtime) fn_filter(expr FnCallExpr) !VrlValue {
 						rt.vars.set(closure_expr.params[1].trim_left('_'), val)
 					}
 					cond := rt.eval(closure_expr.body[0])!
+					if rt.returned { rt.returned = false }
 					if is_truthy(cond) { result.set(k, val) }
 				}
 				rt.restore_closure_params(saved, closure_expr.params)
@@ -1431,10 +1434,15 @@ fn (mut rt Runtime) fn_for_each(expr FnCallExpr) !VrlValue {
 						rt.vars.set(closure_expr.params[1].trim_left('_'), item)
 					}
 					rt.eval(closure_expr.body[0])!
+					if rt.returned {
+						rt.returned = false
+						break
+					}
 				}
 			}
 			ObjectMap {
-				all_keys := c.keys()
+				mut all_keys := c.keys()
+				all_keys.sort()
 				for k in all_keys {
 					val := c.get(k) or { VrlValue(VrlNull{}) }
 					if closure_expr.params.len > 0 {
@@ -1444,6 +1452,10 @@ fn (mut rt Runtime) fn_for_each(expr FnCallExpr) !VrlValue {
 						rt.vars.set(closure_expr.params[1].trim_left('_'), val)
 					}
 					rt.eval(closure_expr.body[0])!
+					if rt.returned {
+						rt.returned = false
+						break
+					}
 				}
 			}
 			else {}
@@ -1493,7 +1505,8 @@ fn (mut rt Runtime) map_keys_impl(container VrlValue, closure_expr ClosureExpr, 
 		ObjectMap {
 			saved := rt.save_closure_params(closure_expr.params)
 			mut result := new_object_map()
-			all_keys := c.keys()
+			mut all_keys := c.keys()
+				all_keys.sort()
 			for k in all_keys {
 				val := c.get(k) or { VrlValue(VrlNull{}) }
 				if closure_expr.params.len > 0 {
@@ -1567,7 +1580,8 @@ fn (mut rt Runtime) map_values_impl(container VrlValue, closure_expr ClosureExpr
 		ObjectMap {
 			saved := rt.save_closure_params(closure_expr.params)
 			mut result := new_object_map()
-			all_keys := c.keys()
+			mut all_keys := c.keys()
+				all_keys.sort()
 			for k in all_keys {
 				val := c.get(k) or { VrlValue(VrlNull{}) }
 				if recursive {

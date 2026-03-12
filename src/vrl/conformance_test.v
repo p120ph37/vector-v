@@ -102,11 +102,13 @@ fn test_upstream_vrl_conformance() {
 	mut failed := 0
 	mut skipped := 0
 	mut skip_unimpl := 0
+	mut err_passed := 0
+	mut err_failed := 0
 	mut errs := []string{}
 
 	for file in sf {
 		src, oj, res, name, skip, is_err := parse_test_file(file)
-		if skip || is_err || res.len == 0 { skipped++; continue }
+		if skip || res.len == 0 { skipped++; continue }
 
 		// Skip tests using unimplemented functions
 		if uses_unimplemented_fn(src) {
@@ -126,6 +128,18 @@ fn test_upstream_vrl_conformance() {
 
 		os.write_file('/tmp/vrl_test_progress.txt', name) or {}
 
+		// For error-expecting tests, just verify we also produce an error
+		if is_err {
+			_ := execute(src, obj) or {
+				// Good - we also errored
+				err_passed++
+				continue
+			}
+			// Bad - we didn't error but should have
+			err_failed++
+			continue
+		}
+
 		actual := execute(src, obj) or {
 			em := err.msg()
 			if res.contains(em) || em.contains(res) { passed++; continue }
@@ -142,11 +156,11 @@ fn test_upstream_vrl_conformance() {
 		}
 	}
 
-	total := passed + failed + skipped + skip_unimpl
+	total := passed + failed + skipped + skip_unimpl + err_passed + err_failed
 
 	mut report := []string{}
 	report << '=== VRL Conformance Results ==='
-	report << 'Total:${total} Pass:${passed} Fail:${failed} Skip:${skipped} UnimplSkip:${skip_unimpl}'
+	report << 'Total:${total} Pass:${passed} Fail:${failed} Skip:${skipped} UnimplSkip:${skip_unimpl} ErrPass:${err_passed} ErrFail:${err_failed}'
 	if errs.len > 0 {
 		report << '\n--- Failures ---'
 		for e in errs { report << e }
