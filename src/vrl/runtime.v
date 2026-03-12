@@ -43,6 +43,8 @@ mut:
 	aborted    bool
 	returned   bool
 	abort_msg  string
+	type_vars  map[string]ObjectMap // Static type tracking for variables
+	type_paths map[string]ObjectMap // Static type tracking for paths
 }
 
 pub fn new_runtime() Runtime {
@@ -88,6 +90,15 @@ pub fn (mut rt Runtime) eval(expr Expr) !VrlValue {
 		AssignExpr {
 			val := rt.eval(expr.value[0])!
 			rt.assign_to(expr.target[0], val)
+			// Track type for type_def: use runtime type as base
+			rt.track_assign_type(expr.target[0], val)
+			// For if-expressions and coalesce expressions, union in the static type
+			// (captures null type for if-without-else, union types from branches)
+			vexpr := expr.value[0]
+			if vexpr is IfExpr || vexpr is CoalesceExpr {
+				static_type := rt.infer_type(vexpr)
+				rt.union_assign_type(expr.target[0], static_type)
+			}
 			return val
 		}
 		BlockExpr {
@@ -229,12 +240,21 @@ fn (mut rt Runtime) eval_object(expr ObjectExpr) !VrlValue {
 
 fn (mut rt Runtime) eval_if(expr IfExpr) !VrlValue {
 	cond := rt.eval(expr.condition[0])!
+	// Save pre-if type state before branch execution modifies it
+	saved_vars := rt.type_vars.clone()
+	saved_paths := rt.type_paths.clone()
 	if is_truthy(cond) {
-		return rt.eval(expr.then_block[0])
+		result := rt.eval(expr.then_block[0])!
+		// Apply type union from both branches using pre-if state
+		rt.update_type_vars_for_if_saved(expr, saved_vars, saved_paths)
+		return result
 	}
 	if expr.else_block.len > 0 {
-		return rt.eval(expr.else_block[0])
+		result := rt.eval(expr.else_block[0])!
+		rt.update_type_vars_for_if_saved(expr, saved_vars, saved_paths)
+		return result
 	}
+	rt.update_type_vars_for_if_saved(expr, saved_vars, saved_paths)
 	return VrlValue(VrlNull{})
 }
 
@@ -250,12 +270,24 @@ fn (mut rt Runtime) eval_block(expr BlockExpr) !VrlValue {
 }
 
 fn (mut rt Runtime) eval_coalesce(expr CoalesceExpr) !VrlValue {
+	// Save type state — RHS conditionally executes
+	saved_vars := rt.type_vars.clone()
+	saved_paths := rt.type_paths.clone()
+
 	result := rt.eval(expr.expr[0]) or {
-		return rt.eval(expr.default_[0])
+		res := rt.eval(expr.default_[0])!
+		// RHS executed: type tracking already updated by eval
+		// Union with saved state since RHS is conditional
+		rt.coalesce_type_update(saved_vars, saved_paths, expr.default_[0])
+		return res
 	}
 	if result is VrlNull {
-		return rt.eval(expr.default_[0])
+		res := rt.eval(expr.default_[0])!
+		rt.coalesce_type_update(saved_vars, saved_paths, expr.default_[0])
+		return res
 	}
+	// RHS didn't execute, but still need to analyze it for type purposes
+	rt.coalesce_type_update(saved_vars, saved_paths, expr.default_[0])
 	return result
 }
 
@@ -263,12 +295,17 @@ fn (mut rt Runtime) eval_binary(expr BinaryExpr) !VrlValue {
 	// Use first byte for fast operator dispatch
 	op0 := expr.op[0]
 	if op0 == `|` && expr.op.len == 2 {
-		// ||
+		// || — save type state, eval, then apply type tracking
+		saved_vars := rt.type_vars.clone()
+		saved_paths := rt.type_paths.clone()
 		left := rt.eval(expr.left[0])!
 		if is_truthy(left) {
+			rt.update_type_vars_for_binary_saved(expr, saved_vars, saved_paths)
 			return left
 		}
-		return rt.eval(expr.right[0])
+		result := rt.eval(expr.right[0])!
+		rt.update_type_vars_for_binary_saved(expr, saved_vars, saved_paths)
+		return result
 	}
 	if op0 == `|` && expr.op.len == 1 {
 		// | — object merge
@@ -277,12 +314,17 @@ fn (mut rt Runtime) eval_binary(expr BinaryExpr) !VrlValue {
 		return fn_merge([left, right])
 	}
 	if op0 == `&` && expr.op.len == 2 {
-		// && — VRL returns boolean false when left is not truthy
+		// && — save type state, eval, then apply type tracking
+		saved_vars := rt.type_vars.clone()
+		saved_paths := rt.type_paths.clone()
 		left := rt.eval(expr.left[0])!
 		if !is_truthy(left) {
+			rt.update_type_vars_for_binary_saved(expr, saved_vars, saved_paths)
 			return VrlValue(false)
 		}
-		return rt.eval(expr.right[0])
+		result := rt.eval(expr.right[0])!
+		rt.update_type_vars_for_binary_saved(expr, saved_vars, saved_paths)
+		return result
 	}
 
 	left := rt.eval(expr.left[0])!
@@ -499,6 +541,150 @@ fn (mut rt Runtime) assign_to(target Expr, val VrlValue) {
 		IndexExpr {
 			// Handle foo.bar = val, foo[0] = val, .path[idx] = val
 			rt.assign_index(target, val)
+		}
+		else {}
+	}
+}
+
+// track_assign_type updates the type environment when a value is assigned.
+fn (mut rt Runtime) track_assign_type(target Expr, val VrlValue) {
+	match target {
+		IdentExpr {
+			rt.type_vars[target.name] = type_from_value(val)
+		}
+		PathExpr {
+			if target.path == '.' {
+				rt.type_paths['.'] = type_from_value(val)
+			} else {
+				clean := if target.path.starts_with('.') { target.path[1..] } else { target.path }
+				rt.type_paths[clean] = type_from_value(val)
+			}
+		}
+		IndexExpr {
+			// For index assignments like a[0] = x or .foo[5] = x,
+			// find the root variable/path and re-read its full value
+			root := find_assign_root(target)
+			match root {
+				IdentExpr {
+					if v := rt.vars.get(root.name) {
+						rt.type_vars[root.name] = type_from_value(v)
+					}
+				}
+				PathExpr {
+					if root.path == '.' {
+						rt.type_paths['.'] = type_from_value(VrlValue(rt.object.clone_map()))
+					} else {
+						clean := if root.path.starts_with('.') {
+							root.path[1..]
+						} else {
+							root.path
+						}
+						v := rt.get_path(root.path) or { VrlValue(VrlNull{}) }
+						rt.type_paths[clean] = type_from_value(v)
+					}
+				}
+				else {}
+			}
+		}
+		else {}
+	}
+}
+
+// find_assign_root walks an IndexExpr chain to find the root IdentExpr or PathExpr.
+fn find_assign_root(expr IndexExpr) Expr {
+	inner := expr.expr[0]
+	match inner {
+		IndexExpr { return find_assign_root(inner) }
+		else { return inner }
+	}
+}
+
+// overlay_path_types overlays individual path type info onto a root object type.
+// Used for type_def(.) to include types from conditional path assignments.
+fn (rt &Runtime) overlay_path_types(base ObjectMap) ObjectMap {
+	// Get existing object inner map or create one
+	existing_inner := base.get('object') or { VrlValue(new_object_map()) }
+	mut inner := match existing_inner {
+		ObjectMap { existing_inner.clone_map() }
+		else { new_object_map() }
+	}
+
+	// Overlay single-segment path types that have conditional info ("undefined")
+	for k, v in rt.type_paths {
+		if k == '.' || k.len == 0 || k.contains('.') || k.contains('[') {
+			continue
+		}
+		// Only overlay if the tracked type has "undefined" (from conditional branches)
+		if _ := v.get('undefined') {
+			// Has conditional info, overlay
+			inner.set(k, VrlValue(v))
+		}
+	}
+
+	// Build result with updated object inner
+	mut result := new_object_map()
+	for rk in base.keys() {
+		if rk == 'object' {
+			continue
+		}
+		rval := base.get(rk) or { continue }
+		result.set(rk, rval)
+	}
+	obj_val := VrlValue(inner)
+	result.set('object', obj_val)
+	return result
+}
+
+// coalesce_type_update handles type tracking for ?? operator.
+// The RHS conditionally executes, so union RHS effects with saved state.
+fn (mut rt Runtime) coalesce_type_update(saved_vars map[string]ObjectMap, saved_paths map[string]ObjectMap, rhs_expr Expr) {
+	// Analyze what types the RHS would assign
+	mut rhs_env := TypeEnv{
+		vars:  saved_vars.clone()
+		paths: saved_paths.clone()
+	}
+	_ = infer_expr_type(rhs_expr, mut rhs_env)
+
+	// Union any changed variables with saved state
+	for k, v in rhs_env.vars {
+		if pre := saved_vars[k] {
+			rt.type_vars[k] = type_union(pre, v)
+		} else {
+			rt.type_vars[k] = v
+		}
+	}
+	for k, v in rhs_env.paths {
+		if pre := saved_paths[k] {
+			rt.type_paths[k] = type_union(pre, v)
+		} else {
+			rt.type_paths[k] = v
+		}
+	}
+}
+
+// union_assign_type unions additional type info with the existing tracked type.
+fn (mut rt Runtime) union_assign_type(target Expr, extra_type ObjectMap) {
+	match target {
+		IdentExpr {
+			if existing := rt.type_vars[target.name] {
+				rt.type_vars[target.name] = type_union(existing, extra_type)
+			} else {
+				rt.type_vars[target.name] = extra_type
+			}
+		}
+		PathExpr {
+			key := if target.path == '.' {
+				'.'
+			} else if target.path.starts_with('.') {
+				target.path[1..]
+			} else {
+				target.path
+			}
+			if existing := rt.type_paths[key] {
+				rt.type_paths[key] = type_union(existing, extra_type)
+			} else {
+				rt.type_paths[key] = extra_type
+			}
 		}
 		else {}
 	}

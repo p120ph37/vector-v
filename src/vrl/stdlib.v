@@ -321,7 +321,6 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'to_regex' { return fn_to_regex(args) }
 		'from_unix_timestamp' { return fn_from_unix_timestamp(args) }
 		'to_unix_timestamp' { return fn_to_unix_timestamp(args) }
-		'type_def' { return fn_type_def(args) }
 		'assert' { return fn_assert(args) }
 		'assert_eq' { return fn_assert_eq(args) }
 		'array' { return fn_ensure_array(args) }
@@ -355,6 +354,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 	// Special functions that need unevaluated args (PathExpr)
 	if name == 'del' { return rt.fn_del(expr) }
 	if name == 'exists' { return rt.fn_exists(expr) }
+	if name == 'type_def' { return rt.fn_type_def_static(expr) }
 	if name == 'filter' { return rt.fn_filter(expr) }
 	if name == 'for_each' { return rt.fn_for_each(expr) }
 	if name == 'map_keys' { return rt.fn_map_keys(expr) }
@@ -412,7 +412,6 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'ceil' { return fn_ceil([a0]) }
 			'floor' { return fn_floor([a0]) }
 			'round' { return fn_round([a0]) }
-			'type_def' { return fn_type_def([a0]) }
 			'array' { return fn_ensure_array([a0]) }
 			'object' { return fn_ensure_object([a0]) }
 			// map_keys and map_values are handled above as special functions
@@ -475,7 +474,6 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		'is_array' { return fn_is_type(args, 'array') }
 		'is_object' { return fn_is_type(args, 'object') }
 		'is_nullish' { return fn_is_nullish(args) }
-		'type_def' { return fn_type_def(args) }
 		'keys' { return fn_keys(args) }
 		'values' { return fn_values(args) }
 		'flatten' { return fn_flatten(args) }
@@ -984,44 +982,71 @@ fn fn_is_nullish(args []VrlValue) !VrlValue {
 	}
 }
 
-fn fn_type_def(args []VrlValue) !VrlValue {
-	if args.len < 1 { return error('type_def requires 1 argument') }
-	return type_def_value(args[0])
+// fn_type_def_static performs type inference on the argument.
+// Uses static analysis for blocks and expressions, runtime eval + type tracking
+// for variables and paths.
+fn (mut rt Runtime) fn_type_def_static(expr FnCallExpr) !VrlValue {
+	if expr.args.len < 1 {
+		return error('type_def requires 1 argument')
+	}
+	arg := expr.args[0]
+	result := rt.resolve_type_def(arg)
+	return VrlValue(result)
 }
 
-fn type_def_value(v VrlValue) !VrlValue {
-	a := v
-	mut result := new_object_map()
-	match a {
-		string { result.set('bytes', VrlValue(true)) }
-		int { result.set('integer', VrlValue(true)) }
-		f64 { result.set('float', VrlValue(true)) }
-		bool { result.set('boolean', VrlValue(true)) }
-		VrlNull { result.set('null', VrlValue(true)) }
-		[]VrlValue {
-			// Build nested type info for array elements
-			mut inner := new_object_map()
-			for i, item in a {
-				elem_type := type_def_value(item) or { VrlValue(new_object_map()) }
-				inner.set('${i}', elem_type)
+// resolve_type_def determines the type for a type_def() argument.
+// Uses a hybrid approach: runtime value for variables/paths, unioned with
+// tracked type info (which includes union types from conditional branches).
+// For complex expressions (blocks, etc.), uses static inference.
+fn (mut rt Runtime) resolve_type_def(arg Expr) ObjectMap {
+	match arg {
+		IdentExpr {
+			// Get runtime value type
+			val := rt.eval(arg) or { VrlValue(VrlNull{}) }
+			runtime_type := type_from_value(val)
+			// Union with tracked type (includes conditional branch info)
+			if tracked := rt.type_vars[arg.name] {
+				return type_union(runtime_type, tracked)
 			}
-			result.set('array', VrlValue(inner))
+			return runtime_type
 		}
-		ObjectMap {
-			// Build nested type info for object keys
-			mut inner := new_object_map()
-			all_keys := a.keys()
-			for k in all_keys {
-				val := a.get(k) or { VrlValue(VrlNull{}) }
-				elem_type := type_def_value(val) or { VrlValue(new_object_map()) }
-				inner.set(k, elem_type)
+		PathExpr {
+			// Get runtime value type
+			val := rt.eval(arg) or { VrlValue(VrlNull{}) }
+			runtime_type := type_from_value(val)
+			// Union with tracked type
+			key := if arg.path == '.' {
+				'.'
+			} else if arg.path.starts_with('.') {
+				arg.path[1..]
+			} else {
+				arg.path
 			}
-			result.set('object', VrlValue(inner))
+			mut result_type := runtime_type
+			if tracked := rt.type_paths[key] {
+				result_type = type_union(result_type, tracked)
+			}
+			// For root object '.', also overlay individual path types
+			if arg.path == '.' {
+				result_type = rt.overlay_path_types(result_type)
+			}
+			return result_type
 		}
-		Timestamp { result.set('timestamp', VrlValue(true)) }
-		VrlRegex { result.set('regex', VrlValue(true)) }
+		IndexExpr {
+			// For indexing (x[1]), use static inference
+			result := rt.infer_type(arg)
+			// If static inference returned any_type, try runtime eval
+			if result.len() == 1 && (result.get('any') or { return result }) == VrlValue(true) {
+				val := rt.eval(arg) or { return result }
+				return type_from_value(val)
+			}
+			return result
+		}
+		else {
+			// For blocks, function calls, etc. use static inference
+			return rt.infer_type(arg)
+		}
 	}
-	return VrlValue(result)
 }
 
 // Object/path functions
