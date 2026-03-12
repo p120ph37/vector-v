@@ -275,26 +275,52 @@ fn fn_object_from_array(args []VrlValue) !VrlValue {
 
 // zip(keys, values)
 fn fn_zip(args []VrlValue) !VrlValue {
-	if args.len < 2 {
-		return error('zip requires 2 arguments')
+	if args.len < 1 {
+		return error('zip requires at least 1 argument')
 	}
-	a0 := args[0]
-	a1 := args[1]
-	keys := match a0 {
-		[]VrlValue { a0 }
-		else { return error('zip first arg must be array') }
+	mut arrays := [][]VrlValue{}
+	if args.len == 1 {
+		// Single arg: must be an array of arrays
+		a := args[0]
+		match a {
+			[]VrlValue {
+				for item in a {
+					inner := item
+					match inner {
+						[]VrlValue { arrays << inner }
+						else { return error('zip requires an array of arrays') }
+					}
+				}
+			}
+			else { return error('zip requires an array argument') }
+		}
+	} else {
+		// Multiple args: each is an array
+		for i, a in args {
+			arr := a
+			match arr {
+				[]VrlValue { arrays << arr }
+				else { return error('zip argument ${i + 1} must be array') }
+			}
+		}
 	}
-	vals := match a1 {
-		[]VrlValue { a1 }
-		else { return error('zip second arg must be array') }
+	if arrays.len == 0 {
+		return VrlValue([]VrlValue{})
+	}
+	// Find min length across all arrays
+	mut min_len := arrays[0].len
+	for arr in arrays {
+		if arr.len < min_len {
+			min_len = arr.len
+		}
 	}
 	mut result := []VrlValue{}
-	max_len := if keys.len < vals.len { keys.len } else { vals.len }
-	for i in 0 .. max_len {
-		k := if i < keys.len { keys[i] } else { VrlValue(VrlNull{}) }
-		v := if i < vals.len { vals[i] } else { VrlValue(VrlNull{}) }
-		pair := [k, v]
-		result << VrlValue(pair)
+	for i in 0 .. min_len {
+		mut tuple := []VrlValue{}
+		for arr in arrays {
+			tuple << arr[i]
+		}
+		result << VrlValue(tuple)
 	}
 	return VrlValue(result)
 }

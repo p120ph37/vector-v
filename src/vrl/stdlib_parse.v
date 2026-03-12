@@ -62,6 +62,15 @@ fn fn_parse_regex(args []VrlValue) !VrlValue {
 		string { a1 }
 		else { return error('parse_regex second arg must be regex') }
 	}
+	// Optional numeric_groups parameter (default: false)
+	mut numeric_groups := false
+	if args.len >= 3 {
+		ng := args[2]
+		match ng {
+			bool { numeric_groups = ng }
+			else {}
+		}
+	}
 	re := pcre.compile(normalize_regex_pattern(pattern)) or {
 		return error('invalid regex: ${pattern}')
 	}
@@ -70,11 +79,15 @@ fn fn_parse_regex(args []VrlValue) !VrlValue {
 	}
 	names := extract_named_groups(pattern)
 	mut result := new_object_map()
-	// Index 0 is the full match
-	result.set('0', VrlValue(s[m.start..m.end]))
-	// Numbered and named capture groups
+	if numeric_groups {
+		// Include all numeric groups
+		result.set('0', VrlValue(s[m.start..m.end]))
+		for i, grp in m.groups {
+			result.set('${i + 1}', VrlValue(grp))
+		}
+	}
+	// Always include named groups
 	for i, grp in m.groups {
-		result.set('${i + 1}', VrlValue(grp))
 		if i < names.len && names[i].len > 0 {
 			result.set(names[i], VrlValue(grp))
 		}
@@ -82,7 +95,7 @@ fn fn_parse_regex(args []VrlValue) !VrlValue {
 	return VrlValue(result)
 }
 
-// parse_regex_all(value, pattern)
+// parse_regex_all(value, pattern, numeric_groups)
 fn fn_parse_regex_all(args []VrlValue) !VrlValue {
 	if args.len < 2 {
 		return error('parse_regex_all requires 2 arguments')
@@ -98,6 +111,14 @@ fn fn_parse_regex_all(args []VrlValue) !VrlValue {
 		string { a1 }
 		else { return error('parse_regex_all second arg must be regex') }
 	}
+	mut numeric_groups := false
+	if args.len >= 3 {
+		ng := args[2]
+		match ng {
+			bool { numeric_groups = ng }
+			else {}
+		}
+	}
 	re := pcre.compile(normalize_regex_pattern(pattern)) or {
 		return error('invalid regex: ${pattern}')
 	}
@@ -111,9 +132,13 @@ fn fn_parse_regex_all(args []VrlValue) !VrlValue {
 			continue
 		}
 		mut obj := new_object_map()
-		obj.set('0', VrlValue(s[pos + m.start..pos + m.end]))
+		if numeric_groups {
+			obj.set('0', VrlValue(s[pos + m.start..pos + m.end]))
+			for i, grp in m.groups {
+				obj.set('${i + 1}', VrlValue(grp))
+			}
+		}
 		for i, grp in m.groups {
-			obj.set('${i + 1}', VrlValue(grp))
 			if i < names.len && names[i].len > 0 {
 				obj.set(names[i], VrlValue(grp))
 			}
@@ -497,6 +522,20 @@ fn fn_parse_tokens(args []VrlValue) !VrlValue {
 }
 
 // parse_duration(value, output_unit)
+// duration_unit_to_ns converts a value in the given unit to nanoseconds.
+fn duration_unit_to_ns(value f64, unit string) !f64 {
+	return match unit {
+		'ns' { value }
+		'us', 'µs' { value * 1000.0 }
+		'ms' { value * 1_000_000.0 }
+		's' { value * 1_000_000_000.0 }
+		'm' { value * 60_000_000_000.0 }
+		'h' { value * 3_600_000_000_000.0 }
+		'd' { value * 86_400_000_000_000.0 }
+		else { error('unknown duration unit: ${unit}') }
+	}
+}
+
 fn fn_parse_duration(args []VrlValue) !VrlValue {
 	if args.len < 2 {
 		return error('parse_duration requires 2 arguments')
@@ -507,43 +546,61 @@ fn fn_parse_duration(args []VrlValue) !VrlValue {
 		string { a0 }
 		else { return error('parse_duration first arg must be string') }
 	}
-	unit := match a1 {
+	out_unit := match a1 {
 		string { a1 }
 		else { return error('parse_duration second arg must be string') }
 	}
-	// Parse number and unit from string
-	mut num_end := 0
-	for num_end < s.len && (s[num_end].is_digit() || s[num_end] == `.`) {
-		num_end++
-	}
-	if num_end == 0 {
-		return error('unable to parse duration: ${s}')
-	}
-	value := s[..num_end].f64()
-	src_unit := s[num_end..].trim_space()
 
-	// Convert to nanoseconds first
-	ns := match src_unit {
-		'ns' { value }
-		'us', 'µs' { value * 1000.0 }
-		'ms' { value * 1_000_000.0 }
-		's' { value * 1_000_000_000.0 }
-		'm' { value * 60_000_000_000.0 }
-		'h' { value * 3_600_000_000_000.0 }
-		'd' { value * 86_400_000_000_000.0 }
-		else { return error('unknown duration unit: ${src_unit}') }
+	// Parse one or more number+unit pairs (e.g., "1s", "1s 1ms", "2h 30m 15s")
+	mut total_ns := f64(0)
+	mut pos := 0
+	mut parsed_any := false
+	for pos < s.len {
+		// Skip whitespace
+		for pos < s.len && s[pos] == ` ` {
+			pos++
+		}
+		if pos >= s.len { break }
+
+		// Parse number
+		mut num_end := pos
+		for num_end < s.len && (s[num_end].is_digit() || s[num_end] == `.` || s[num_end] == `-`) {
+			num_end++
+		}
+		if num_end == pos {
+			return error('unable to parse duration: ${s}')
+		}
+		value := s[pos..num_end].f64()
+
+		// Parse unit
+		mut unit_end := num_end
+		for unit_end < s.len && s[unit_end] != ` ` && !s[unit_end].is_digit() && s[unit_end] != `-` {
+			unit_end++
+		}
+		src_unit := s[num_end..unit_end].trim_space()
+		if src_unit.len == 0 {
+			return error('unable to parse duration: ${s}')
+		}
+
+		total_ns += duration_unit_to_ns(value, src_unit)!
+		parsed_any = true
+		pos = unit_end
+	}
+
+	if !parsed_any {
+		return error('unable to parse duration: ${s}')
 	}
 
 	// Convert to output unit
-	result := match unit {
-		'ns' { ns }
-		'us', 'µs' { ns / 1000.0 }
-		'ms' { ns / 1_000_000.0 }
-		's' { ns / 1_000_000_000.0 }
-		'm' { ns / 60_000_000_000.0 }
-		'h' { ns / 3_600_000_000_000.0 }
-		'd' { ns / 86_400_000_000_000.0 }
-		else { return error('unknown output unit: ${unit}') }
+	result := match out_unit {
+		'ns' { total_ns }
+		'us', 'µs' { total_ns / 1000.0 }
+		'ms' { total_ns / 1_000_000.0 }
+		's' { total_ns / 1_000_000_000.0 }
+		'm' { total_ns / 60_000_000_000.0 }
+		'h' { total_ns / 3_600_000_000_000.0 }
+		'd' { total_ns / 86_400_000_000_000.0 }
+		else { return error('unknown output unit: ${out_unit}') }
 	}
 	return VrlValue(result)
 }
