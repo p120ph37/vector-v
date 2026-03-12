@@ -44,6 +44,56 @@ fn (mut p Parser) parse_expr() !Expr {
 fn (mut p Parser) parse_assignment() !Expr {
 	left := p.parse_coalesce()!
 
+	// Check for ok/err assignment: `ok_target, err_target = expr`
+	// The ok target (left) must be a path or ident, and the err target is a simple path/ident.
+	if p.current().kind == .comma {
+		l := left
+		ok_is_target := l is PathExpr || l is IdentExpr || l is MetaPathExpr
+		if ok_is_target {
+			saved_pos := p.pos
+			p.advance() // skip comma
+			p.skip_newlines()
+			// Only parse a simple target (ident or path), not a full expression
+			mut err_target := Expr(LiteralExpr{value: VrlValue(VrlNull{})})
+			mut got_target := false
+			if p.current().kind == .dot_ident || p.current().kind == .dot {
+				tok := p.current()
+				p.advance()
+				err_target = Expr(PathExpr{path: tok.lit})
+				got_target = true
+			} else if p.current().kind == .ident {
+				name := p.current().lit
+				p.advance()
+				// Check for dotted path like err.bar.baz
+				mut full_name := name
+				for p.current().kind == .dot && p.pos + 1 < p.tokens.len
+					&& p.tokens[p.pos + 1].kind == .ident {
+					p.advance() // skip .
+					full_name += '.' + p.current().lit
+					p.advance() // skip ident
+				}
+				if full_name.contains('.') {
+					err_target = Expr(PathExpr{path: '.' + full_name})
+				} else {
+					err_target = Expr(IdentExpr{name: name})
+				}
+				got_target = true
+			}
+			if got_target && p.current().kind == .assign {
+				p.advance()
+				p.skip_newlines()
+				right := p.parse_assignment()!
+				return Expr(OkErrAssignExpr{
+					ok_target: [left]
+					err_target: [err_target]
+					value: [right]
+				})
+			}
+			// Not an ok/err assignment, backtrack
+			p.pos = saved_pos
+		}
+	}
+
 	if p.current().kind == .assign {
 		p.advance()
 		p.skip_newlines()

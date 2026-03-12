@@ -329,3 +329,18 @@ fn test_starts_ends_with() {
 	result2 := execute('ends_with("hello", "lo")', map[string]VrlValue{}) or { panic(err) }
 	assert result2 == VrlValue(true)
 }
+
+fn test_ok_err_assignment() {
+	// Success case: .ok gets value, err gets null
+	r1 := execute('.x = 1\n.ok, err = 1 / .x\ndel(.x)\n[., err]', map[string]VrlValue{}) or {
+		panic(err)
+	}
+	j1 := vrl_to_json(r1)
+	assert j1 == '[{"ok":1.0},null]', 'ok_err success: got ${j1}'
+
+	// Error case: ok gets default, err gets error string
+	r2 := execute('.ok, .err = 1 / 0\n.', map[string]VrlValue{}) or { panic(err) }
+	j2 := vrl_to_json(r2)
+	assert j2.contains('"err"'), 'ok_err error: got ${j2}'
+	assert j2.contains('divide by zero'), 'ok_err error msg: got ${j2}'
+}
