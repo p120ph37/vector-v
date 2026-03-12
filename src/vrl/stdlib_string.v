@@ -3,7 +3,7 @@ module vrl
 import math
 import regex.pcre
 
-// camelcase(value)
+// camelcase(value, [original_case])
 fn fn_camelcase(args []VrlValue) !VrlValue {
 	if args.len < 1 {
 		return error('camelcase requires 1 argument')
@@ -13,7 +13,14 @@ fn fn_camelcase(args []VrlValue) !VrlValue {
 		string { a }
 		else { return error('camelcase requires a string') }
 	}
-	words := split_words(s)
+	mut words := split_words(s)
+	if args.len >= 2 {
+		oc := args[1]
+		match oc {
+			string { words = split_words_by_case(s, oc) }
+			else {}
+		}
+	}
 	mut result := []u8{}
 	for i, w in words {
 		if i == 0 {
@@ -39,7 +46,7 @@ fn fn_camelcase(args []VrlValue) !VrlValue {
 	return VrlValue(result.bytestr())
 }
 
-// pascalcase(value)
+// pascalcase(value, [original_case])
 fn fn_pascalcase(args []VrlValue) !VrlValue {
 	if args.len < 1 {
 		return error('pascalcase requires 1 argument')
@@ -49,7 +56,14 @@ fn fn_pascalcase(args []VrlValue) !VrlValue {
 		string { a }
 		else { return error('pascalcase requires a string') }
 	}
-	words := split_words(s)
+	mut words := split_words(s)
+	if args.len >= 2 {
+		oc := args[1]
+		match oc {
+			string { words = split_words_by_case(s, oc) }
+			else {}
+		}
+	}
 	mut result := []u8{}
 	for w in words {
 		mut first := true
@@ -69,7 +83,7 @@ fn fn_pascalcase(args []VrlValue) !VrlValue {
 	return VrlValue(result.bytestr())
 }
 
-// snakecase(value)
+// snakecase(value, [original_case])
 fn fn_snakecase(args []VrlValue) !VrlValue {
 	if args.len < 1 {
 		return error('snakecase requires 1 argument')
@@ -79,7 +93,14 @@ fn fn_snakecase(args []VrlValue) !VrlValue {
 		string { a }
 		else { return error('snakecase requires a string') }
 	}
-	words := split_words(s)
+	mut words := split_words(s)
+	if args.len >= 2 {
+		oc := args[1]
+		match oc {
+			string { words = split_words_by_case(s, oc) }
+			else {}
+		}
+	}
 	mut parts := []string{}
 	for w in words {
 		parts << w.to_lower()
@@ -87,7 +108,7 @@ fn fn_snakecase(args []VrlValue) !VrlValue {
 	return VrlValue(parts.join('_'))
 }
 
-// kebabcase(value)
+// kebabcase(value, [original_case])
 fn fn_kebabcase(args []VrlValue) !VrlValue {
 	if args.len < 1 {
 		return error('kebabcase requires 1 argument')
@@ -97,7 +118,14 @@ fn fn_kebabcase(args []VrlValue) !VrlValue {
 		string { a }
 		else { return error('kebabcase requires a string') }
 	}
-	words := split_words(s)
+	mut words := split_words(s)
+	if args.len >= 2 {
+		oc := args[1]
+		match oc {
+			string { words = split_words_by_case(s, oc) }
+			else {}
+		}
+	}
 	mut parts := []string{}
 	for w in words {
 		parts << w.to_lower()
@@ -105,7 +133,7 @@ fn fn_kebabcase(args []VrlValue) !VrlValue {
 	return VrlValue(parts.join('-'))
 }
 
-// screamingsnakecase(value)
+// screamingsnakecase(value, [original_case])
 fn fn_screamingsnakecase(args []VrlValue) !VrlValue {
 	if args.len < 1 {
 		return error('screamingsnakecase requires 1 argument')
@@ -115,12 +143,81 @@ fn fn_screamingsnakecase(args []VrlValue) !VrlValue {
 		string { a }
 		else { return error('screamingsnakecase requires a string') }
 	}
-	words := split_words(s)
+	mut words := split_words(s)
+	if args.len >= 2 {
+		oc := args[1]
+		match oc {
+			string { words = split_words_by_case(s, oc) }
+			else {}
+		}
+	}
 	mut parts := []string{}
 	for w in words {
 		parts << w.to_upper()
 	}
 	return VrlValue(parts.join('_'))
+}
+
+// split_words_by_case splits a string into words based on the specified original case.
+// This matches the Rust convert_case crate's from_case() behavior:
+// only use the boundaries appropriate for the declared case.
+fn split_words_by_case(s string, original_case string) []string {
+	normalized := original_case.to_lower().replace('-', '').replace('_', '').replace(' ', '')
+	return match normalized {
+		'snakecase', 'snake', 'screamingsnakecase', 'screamingsnake', 'screaming' {
+			// Split on underscores only
+			s.split('_')
+		}
+		'kebabcase', 'kebab' {
+			// Split on hyphens only
+			s.split('-')
+		}
+		'camelcase', 'camel', 'pascalcase', 'pascal' {
+			// Split on uppercase letter boundaries only (no separator splitting)
+			split_words_camel(s)
+		}
+		else {
+			split_words(s)
+		}
+	}
+}
+
+// split_words_camel splits only on uppercase letter boundaries.
+// Does NOT split on underscores, hyphens, or spaces.
+fn split_words_camel(s string) []string {
+	mut words := []string{}
+	mut current := []u8{}
+	bytes := s.bytes()
+	for i := 0; i < bytes.len; i++ {
+		c := bytes[i]
+		if c >= `A` && c <= `Z` {
+			// Check for transitions
+			if current.len > 0 {
+				// Check if this is part of an acronym (consecutive uppercase)
+				prev_upper := i > 0 && bytes[i - 1] >= `A` && bytes[i - 1] <= `Z`
+				next_lower := i + 1 < bytes.len && bytes[i + 1] >= `a` && bytes[i + 1] <= `z`
+				if prev_upper && next_lower {
+					// End of acronym: "XMLParser" → ["XML", "Parser"]
+					words << current.bytestr()
+					current = [c]
+				} else if !prev_upper {
+					// New word starts
+					words << current.bytestr()
+					current = [c]
+				} else {
+					current << c
+				}
+			} else {
+				current << c
+			}
+		} else {
+			current << c
+		}
+	}
+	if current.len > 0 {
+		words << current.bytestr()
+	}
+	return words
 }
 
 // split_words splits a string into words for case conversion.
