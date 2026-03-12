@@ -22,6 +22,7 @@ pub type Expr = LiteralExpr
 	| ReturnExpr
 	| NotExpr
 	| ClosureExpr
+	| OkErrAssignExpr
 
 pub struct LiteralExpr {
 pub:
@@ -137,4 +138,12 @@ pub struct ClosureExpr {
 pub:
 	params []string
 	body   []Expr
+}
+
+// OkErrAssignExpr represents `ok_target, err_target = expr`
+pub struct OkErrAssignExpr {
+pub:
+	ok_target  []Expr // PathExpr or IdentExpr for the ok value
+	err_target []Expr // PathExpr or IdentExpr for the err value
+	value      []Expr // the expression to evaluate
 }

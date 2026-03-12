@@ -6,6 +6,32 @@ import rand
 import regex.pcre
 import time
 
+// normalize_regex_pattern translates Rust-style regex anchors to PCRE-compatible equivalents.
+// Rust regex uses \A (start of string) and \z (end of string) which V's pcre module doesn't support.
+fn normalize_regex_pattern(pattern string) string {
+	if !pattern.contains('\\A') && !pattern.contains('\\z') {
+		return pattern
+	}
+	mut result := []u8{cap: pattern.len}
+	mut i := 0
+	for i < pattern.len {
+		if i + 1 < pattern.len && pattern[i] == `\\` {
+			if pattern[i + 1] == `A` {
+				result << `^`
+				i += 2
+				continue
+			} else if pattern[i + 1] == `z` {
+				result << `$`
+				i += 2
+				continue
+			}
+		}
+		result << pattern[i]
+		i++
+	}
+	return result.bytestr()
+}
+
 // resolve_named_args evaluates function arguments and resolves named args into a map.
 fn (mut rt Runtime) resolve_named_args(expr FnCallExpr) !([]VrlValue, map[string]VrlValue) {
 	mut positional := []VrlValue{}
@@ -647,7 +673,7 @@ fn fn_replace(args []VrlValue) !VrlValue {
 			return VrlValue(s.replace(p, replacement))
 		}
 		VrlRegex {
-			re := pcre.compile(p.pattern) or { return VrlValue(s) }
+			re := pcre.compile(normalize_regex_pattern(p.pattern)) or { return VrlValue(s) }
 			if count == 1 {
 				return VrlValue(re.replace(s, replacement))
 			}
@@ -700,7 +726,7 @@ fn split_string_with_limit(s string, delim string, limit int) !VrlValue {
 }
 
 fn split_regex_with_limit(s string, pattern string, limit int) !VrlValue {
-	re := pcre.compile(pattern) or { return error('invalid regex in split') }
+	re := pcre.compile(normalize_regex_pattern(pattern)) or { return error('invalid regex in split') }
 	mut result := []VrlValue{}
 	mut pos := 0
 	mut count := 0
@@ -1010,32 +1036,119 @@ fn (mut rt Runtime) fn_del(expr FnCallExpr) !VrlValue {
 				return old
 			}
 			clean := if path_expr.path.starts_with('.') { path_expr.path[1..] } else { path_expr.path }
-			parts := clean.split('.')
+			parts := split_path_segments(clean)
 			if parts.len == 1 {
 				val := rt.object.delete(parts[0])
 				return val
 			}
-			if parts.len == 2 {
-				if top_val := rt.object.get(parts[0]) {
-					tv := top_val
-					match tv {
-						ObjectMap {
-							val := tv.get(parts[1]) or { VrlValue(VrlNull{}) }
-							mut m := tv.clone_map()
-							m.delete(parts[1])
-							rt.object.set(parts[0], VrlValue(m))
-							return val
-						}
-						else {}
-					}
-				}
-			}
-			return VrlValue(VrlNull{})
+			return rt.del_nested_path(parts)
+		}
+		IndexExpr {
+			return rt.del_index_expr(path_expr)
 		}
 		else {
 			return rt.eval(path_expr)
 		}
 	}
+}
+
+fn (mut rt Runtime) del_nested_path(parts []string) !VrlValue {
+	if parts.len == 2 {
+		if top_val := rt.object.get(parts[0]) {
+			tv := top_val
+			match tv {
+				ObjectMap {
+					val := tv.get(parts[1]) or { VrlValue(VrlNull{}) }
+					mut m := tv.clone_map()
+					m.delete(parts[1])
+					rt.object.set(parts[0], VrlValue(m))
+					return val
+				}
+				else {}
+			}
+		}
+	}
+	if parts.len > 2 {
+		mut current := rt.object.get(parts[0]) or { return VrlValue(VrlNull{}) }
+		for i in 1 .. parts.len - 1 {
+			c := current
+			match c {
+				ObjectMap {
+					current = c.get(parts[i]) or { return VrlValue(VrlNull{}) }
+				}
+				else { return VrlValue(VrlNull{}) }
+			}
+		}
+		c := current
+		match c {
+			ObjectMap {
+				last_key := parts[parts.len - 1]
+				val := c.get(last_key) or { VrlValue(VrlNull{}) }
+				mut m := c.clone_map()
+				m.delete(last_key)
+				rt.set_nested_path(parts[..parts.len - 1], VrlValue(m))
+				return val
+			}
+			else { return VrlValue(VrlNull{}) }
+		}
+	}
+	return VrlValue(VrlNull{})
+}
+
+fn (mut rt Runtime) del_index_expr(idx_expr IndexExpr) !VrlValue {
+	container_expr := idx_expr.expr[0]
+	index_expr_v := idx_expr.index[0]
+	key_val := rt.eval(index_expr_v)!
+	kv := key_val
+	key := match kv {
+		string { kv }
+		else { return VrlValue(VrlNull{}) }
+	}
+
+	if container_expr is IdentExpr {
+		name := container_expr.name
+		if existing := rt.vars.get(name) {
+			e := existing
+			match e {
+				ObjectMap {
+					val := e.get(key) or { VrlValue(VrlNull{}) }
+					mut m := e.clone_map()
+					m.delete(key)
+					rt.vars.set(name, VrlValue(m))
+					return val
+				}
+				else {}
+			}
+		}
+	} else if container_expr is PathExpr {
+		if existing := rt.get_path(container_expr.path) {
+			e := existing
+			match e {
+				ObjectMap {
+					val := e.get(key) or { VrlValue(VrlNull{}) }
+					mut m := e.clone_map()
+					m.delete(key)
+					rt.assign_to(Expr(container_expr), VrlValue(m))
+					return val
+				}
+				else {}
+			}
+		}
+	} else if container_expr is IndexExpr {
+		parent_val := rt.eval(Expr(container_expr))!
+		pv := parent_val
+		match pv {
+			ObjectMap {
+				val := pv.get(key) or { VrlValue(VrlNull{}) }
+				mut m := pv.clone_map()
+				m.delete(key)
+				rt.assign_index(container_expr, VrlValue(m))
+				return val
+			}
+			else {}
+		}
+	}
+	return VrlValue(VrlNull{})
 }
 
 fn (mut rt Runtime) fn_exists(expr FnCallExpr) !VrlValue {
@@ -2048,7 +2161,7 @@ fn fn_match(args []VrlValue) !VrlValue {
 		else { return error('match second arg must be regex') }
 	}
 	// Use pcre for matching (supports (?i) and other flags)
-	re := pcre.compile(pattern) or { return error('invalid regex: ${pattern}') }
+	re := pcre.compile(normalize_regex_pattern(pattern)) or { return error('invalid regex: ${pattern}') }
 	if _ := re.find(s) {
 		return VrlValue(true)
 	}
@@ -2073,7 +2186,7 @@ fn fn_match_any(args []VrlValue) !VrlValue {
 			string { p }
 			else { continue }
 		}
-		re := pcre.compile(pat) or { continue }
+		re := pcre.compile(normalize_regex_pattern(pat)) or { continue }
 		if _ := re.find(s) {
 			return VrlValue(true)
 		}
@@ -2139,7 +2252,7 @@ fn fn_find(args []VrlValue) !VrlValue {
 	a1v := a1
 	match a1v {
 		VrlRegex {
-			re := pcre.compile(a1v.pattern) or { return VrlValue(VrlNull{}) }
+			re := pcre.compile(normalize_regex_pattern(a1v.pattern)) or { return VrlValue(VrlNull{}) }
 			if m := re.find(search_str) {
 				return VrlValue(m.start + from)
 			}

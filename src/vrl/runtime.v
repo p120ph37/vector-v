@@ -35,12 +35,14 @@ module vrl
 // Rust's BTreeMap stores small collections in a single sorted node.
 pub struct Runtime {
 mut:
-	object   ObjectMap // The root object (.)
-	metadata ObjectMap // Metadata (%)
-	vars     ObjectMap // Local variables
-	aborted  bool
-	returned bool
-	abort_msg string
+	object     ObjectMap  // The root object (.) when it's an object
+	root_array []VrlValue // The root value when . was assigned a non-object value
+	has_root_array bool   // True if root was assigned a non-object value
+	metadata   ObjectMap  // Metadata (%)
+	vars       ObjectMap  // Local variables
+	aborted    bool
+	returned   bool
+	abort_msg  string
 }
 
 pub fn new_runtime() Runtime {
@@ -155,10 +157,51 @@ pub fn (mut rt Runtime) eval(expr Expr) !VrlValue {
 			}
 			return VrlValue(VrlNull{})
 		}
+		OkErrAssignExpr {
+			return rt.eval_ok_err_assign(expr)
+		}
 		ClosureExpr {
 			return VrlValue(VrlNull{})
 		}
 	}
+}
+
+fn (mut rt Runtime) eval_ok_err_assign(expr OkErrAssignExpr) !VrlValue {
+	// Evaluate the expression; if it errors, assign default to ok and error string to err
+	val := rt.eval(expr.value[0]) or {
+		err_msg := err.msg()
+		// Determine a type-appropriate default for ok value
+		ok_default := ok_err_default_value(expr.value[0])
+		rt.assign_to(expr.ok_target[0], ok_default)
+		rt.assign_to(expr.err_target[0], VrlValue(err_msg))
+		return VrlValue(err_msg)
+	}
+	// Success: assign value to ok, null to err
+	rt.assign_to(expr.ok_target[0], val)
+	rt.assign_to(expr.err_target[0], VrlValue(VrlNull{}))
+	return val
+}
+
+// ok_err_default_value returns the type-appropriate default for an expression's ok value.
+// Division always returns float, so default to 0.0. Function calls that return known types
+// can be mapped here. Otherwise, return null.
+fn ok_err_default_value(expr Expr) VrlValue {
+	if expr is BinaryExpr {
+		if expr.op == '/' {
+			return VrlValue(f64(0))
+		}
+	}
+	if expr is FnCallExpr {
+		// Functions that return specific types
+		match expr.name {
+			'to_int', 'int' { return VrlValue(0) }
+			'to_float', 'to_unix_timestamp' { return VrlValue(f64(0)) }
+			'to_string', 'string' { return VrlValue('') }
+			'to_bool', 'bool' { return VrlValue(false) }
+			else {}
+		}
+	}
+	return VrlValue(VrlNull{})
 }
 
 fn (mut rt Runtime) eval_array(expr ArrayExpr) !VrlValue {
@@ -274,23 +317,91 @@ fn (mut rt Runtime) eval_binary(expr BinaryExpr) !VrlValue {
 	}
 }
 
+// split_path_segments splits a cleaned path (no leading dot) into segments,
+// handling quoted segments like foo."bar.baz"[0] properly.
+fn split_path_segments(clean string) []string {
+	if !clean.contains('"') && !clean.contains('[') {
+		return clean.split('.')
+	}
+	mut segments := []string{}
+	mut i := 0
+	mut seg_start := 0
+	for i < clean.len {
+		if clean[i] == `"` {
+			// Quoted segment: find closing quote
+			i++
+			start := i
+			for i < clean.len && clean[i] != `"` {
+				if clean[i] == `\\` && i + 1 < clean.len {
+					i++
+				}
+				i++
+			}
+			segments << clean[start..i]
+			if i < clean.len {
+				i++ // skip closing "
+			}
+			seg_start = i
+			// Skip dot after quoted segment
+			if i < clean.len && clean[i] == `.` {
+				i++
+				seg_start = i
+			}
+		} else if clean[i] == `[` {
+			// Array index: add preceding segment if any, then index
+			if i > seg_start {
+				segments << clean[seg_start..i]
+			}
+			i++ // skip [
+			idx_start := i
+			for i < clean.len && clean[i] != `]` {
+				i++
+			}
+			segments << clean[idx_start..i]
+			if i < clean.len {
+				i++ // skip ]
+			}
+			seg_start = i
+			if i < clean.len && clean[i] == `.` {
+				i++
+				seg_start = i
+			}
+		} else if clean[i] == `.` {
+			if i > seg_start {
+				segments << clean[seg_start..i]
+			}
+			i++
+			seg_start = i
+		} else {
+			i++
+		}
+	}
+	if seg_start < clean.len {
+		segments << clean[seg_start..]
+	}
+	return segments
+}
+
 // Path access — avoids full object copy for simple lookups.
 fn (rt &Runtime) get_path(path string) !VrlValue {
 	if path == '.' {
+		if rt.has_root_array {
+			return VrlValue(rt.root_array.clone())
+		}
 		return VrlValue(rt.object.clone_map())
 	}
 	clean := if path.starts_with('.') { path[1..] } else { path }
 
-	// Fast path for single-segment (no dots) — most common case
-	if !clean.contains('.') {
+	// Fast path for single-segment (no dots, no quotes) — most common case
+	if !clean.contains('.') && !clean.contains('"') && !clean.contains('[') {
 		if val := rt.object.get(clean) {
 			return val
 		}
 		return VrlValue(VrlNull{})
 	}
 
-	// Multi-segment: first key from ObjectMap, then traverse nested map[string]VrlValue
-	parts := clean.split('.')
+	// Multi-segment: first key from ObjectMap, then traverse nested
+	parts := split_path_segments(clean)
 	if val := rt.object.get(parts[0]) {
 		if parts.len == 1 {
 			return val
@@ -302,6 +413,14 @@ fn (rt &Runtime) get_path(path string) !VrlValue {
 				ObjectMap {
 					if next := cur.get(parts[i]) {
 						current = next
+					} else {
+						return VrlValue(VrlNull{})
+					}
+				}
+				[]VrlValue {
+					idx := parts[i].int()
+					if idx >= 0 && idx < cur.len {
+						current = cur[idx]
 					} else {
 						return VrlValue(VrlNull{})
 					}
@@ -336,18 +455,23 @@ fn (mut rt Runtime) assign_to(target Expr, val VrlValue) {
 				match v {
 					ObjectMap {
 						rt.object = v.clone_map()
+						rt.has_root_array = false
+					}
+					[]VrlValue {
+						rt.root_array = v.clone()
+						rt.has_root_array = true
 					}
 					else {}
 				}
 				return
 			}
 			clean := if target.path.starts_with('.') { target.path[1..] } else { target.path }
-			// Fast path: single segment (no dot) — most common case
-			if !clean.contains('.') {
+			// Fast path: single segment (no dot, no quotes) — most common case
+			if !clean.contains('.') && !clean.contains('"') && !clean.contains('[') {
 				rt.object.set(clean, val)
 				return
 			}
-			parts := clean.split('.')
+			parts := split_path_segments(clean)
 			rt.set_nested_path(parts, val)
 		}
 		IdentExpr {

@@ -388,10 +388,34 @@ fn (mut l Lexer) read_prefixed_string(prefix u8, line int, col int) Token {
 fn (mut l Lexer) read_dot_path(line int, col int) Token {
 	start := l.pos
 	l.advance() // skip initial .
-	for l.pos < l.src.len
-		&& (l.src[l.pos].is_letter() || l.src[l.pos].is_digit() || l.src[l.pos] == `_`
-		|| l.src[l.pos] == `.` || l.src[l.pos] == `@`) {
-		l.advance()
+	for l.pos < l.src.len {
+		if l.src[l.pos].is_letter() || l.src[l.pos].is_digit() || l.src[l.pos] == `_`
+			|| l.src[l.pos] == `@` {
+			l.advance()
+		} else if l.src[l.pos] == `.` {
+			// Peek ahead: if followed by a quote or identifier char, continue path
+			if l.pos + 1 < l.src.len
+				&& (l.src[l.pos + 1].is_letter() || l.src[l.pos + 1] == `_`
+				|| l.src[l.pos + 1] == `"` || l.src[l.pos + 1] == `@`) {
+				l.advance() // skip .
+			} else {
+				break
+			}
+		} else if l.src[l.pos] == `"` {
+			// Quoted path segment: ."key with special chars"
+			l.advance() // skip opening "
+			for l.pos < l.src.len && l.src[l.pos] != `"` {
+				if l.src[l.pos] == `\\` && l.pos + 1 < l.src.len {
+					l.advance() // skip escape char
+				}
+				l.advance()
+			}
+			if l.pos < l.src.len {
+				l.advance() // skip closing "
+			}
+		} else {
+			break
+		}
 	}
 	// Check for array index like .foo[0]
 	if l.pos < l.src.len && l.src[l.pos] == `[` {

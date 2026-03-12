@@ -82,7 +82,7 @@ fn cmp_result(actual VrlValue, expected string) bool {
 	}
 	// Handle regex literal: r'...'
 	if et.starts_with("r'") && et.ends_with("'") {
-		rx_str := et[2..et.len - 1]
+		rx_str := et[2..et.len - 1].replace("\\'", "'")
 		a := actual
 		if a is VrlRegex && a.pattern == rx_str { return true }
 	}
@@ -167,6 +167,6 @@ fn test_upstream_vrl_conformance() {
 	}
 	os.write_file('/tmp/vrl_conformance_results.txt', report.join('\n')) or {}
 	// Many remaining failures require static type analysis (type_def) which is
-	// not implemented in our runtime-based interpreter. Allow up to 45 failures.
-	assert failed <= 45, 'VRL conformance: ${failed} failures (max 45 allowed). See /tmp/vrl_conformance_results.txt'
+	// not implemented in our runtime-based interpreter. Allow up to 35 failures.
+	assert failed <= 35, 'VRL conformance: ${failed} failures (max 35 allowed). See /tmp/vrl_conformance_results.txt'
 }
