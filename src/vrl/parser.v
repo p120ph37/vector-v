@@ -332,7 +332,7 @@ fn (mut p Parser) parse_primary() !Expr {
 	match tok.kind {
 		.integer {
 			p.advance()
-			return Expr(LiteralExpr{value: VrlValue(tok.lit.int())})
+			return Expr(LiteralExpr{value: VrlValue(tok.lit.i64())})
 		}
 		.float {
 			p.advance()

@@ -8,7 +8,7 @@ fn fn_chunks(args []VrlValue) !VrlValue {
 	a0 := args[0]
 	a1 := args[1]
 	chunk_size := match a1 {
-		int { a1 }
+		i64 { a1 }
 		else { return error('chunks second arg must be integer') }
 	}
 	if chunk_size < 1 {
@@ -19,7 +19,7 @@ fn fn_chunks(args []VrlValue) !VrlValue {
 			mut result := []VrlValue{}
 			mut i := 0
 			for i < a0.len {
-				end := if i + chunk_size > a0.len { a0.len } else { i + chunk_size }
+				end := if i + int(chunk_size) > a0.len { a0.len } else { i + int(chunk_size) }
 				result << VrlValue(a0[i..end])
 				i = end
 			}
@@ -29,7 +29,7 @@ fn fn_chunks(args []VrlValue) !VrlValue {
 			mut result := []VrlValue{}
 			mut i := 0
 			for i < a0.len {
-				end := if i + chunk_size > a0.len { a0.len } else { i + chunk_size }
+				end := if i + int(chunk_size) > a0.len { a0.len } else { i + int(chunk_size) }
 				result << VrlValue(a0[i..end])
 				i = end
 			}

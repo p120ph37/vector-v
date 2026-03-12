@@ -22,7 +22,7 @@ fn fn_ip_aton(args []VrlValue) !VrlValue {
 		}
 		result = result * 256 + octet
 	}
-	return VrlValue(int(result))
+	return VrlValue(i64(result))
 }
 
 // ip_ntoa(value) - convert integer to IPv4
@@ -32,7 +32,7 @@ fn fn_ip_ntoa(args []VrlValue) !VrlValue {
 	}
 	a := args[0]
 	n := match a {
-		int { i64(a) }
+		i64 { i64(a) }
 		else { return error('ip_ntoa requires an integer') }
 	}
 	a1 := (n >> 24) & 0xFF

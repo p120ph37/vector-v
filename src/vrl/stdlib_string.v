@@ -540,7 +540,7 @@ fn (mut rt Runtime) fn_replace_with(expr FnCallExpr) !VrlValue {
 				cv := rt.eval(expr.args[i])!
 				c := cv
 				match c {
-					int { count = c }
+					i64 { count = int(c) }
 					else {}
 				}
 			}

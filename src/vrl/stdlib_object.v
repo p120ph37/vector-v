@@ -121,7 +121,7 @@ fn remove_nested(container VrlValue, segments []VrlValue) !VrlValue {
 			s := seg
 			key := match s {
 				string { s }
-				int { '${s}' }
+				i64 { '${s}' }
 				else { return VrlValue(container) }
 			}
 			if rest.len == 0 {
@@ -138,7 +138,7 @@ fn remove_nested(container VrlValue, segments []VrlValue) !VrlValue {
 		[]VrlValue {
 			s := seg
 			idx := match s {
-				int { if s < 0 { c.len + s } else { s } }
+				i64 { if s < 0 { c.len + int(s) } else { int(s) } }
 				string { s.int() }
 				else { return VrlValue(container) }
 			}

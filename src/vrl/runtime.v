@@ -205,7 +205,7 @@ fn ok_err_default_value(expr Expr) VrlValue {
 	if expr is FnCallExpr {
 		// Functions that return specific types
 		match expr.name {
-			'to_int', 'int' { return VrlValue(0) }
+			'to_int', 'int' { return VrlValue(i64(0)) }
 			'to_float', 'to_unix_timestamp' { return VrlValue(f64(0)) }
 			'to_string', 'string' { return VrlValue('') }
 			'to_bool', 'bool' { return VrlValue(false) }
@@ -741,7 +741,7 @@ fn set_in_container(container VrlValue, key VrlValue, val VrlValue) VrlValue {
 				}
 			}
 		}
-		int {
+		i64 {
 			// Array index access
 			match c {
 				[]VrlValue {
@@ -752,7 +752,7 @@ fn set_in_container(container VrlValue, key VrlValue, val VrlValue) VrlValue {
 							// Negative index beyond bounds: prepend nulls
 							// e.g. arr=[1,2,3], k=-4: idx=-1, prepend 1 null → [null,1,2,3], then set [0]=val
 							prepend_count := -idx
-							mut new_arr := []VrlValue{len: prepend_count, init: VrlValue(VrlNull{})}
+							mut new_arr := []VrlValue{len: int(prepend_count), init: VrlValue(VrlNull{})}
 							for elem in arr {
 								new_arr << elem
 							}
@@ -773,7 +773,7 @@ fn set_in_container(container VrlValue, key VrlValue, val VrlValue) VrlValue {
 					// Container is not an array — create one
 					if k < 0 {
 						target_len := if -k > 0 { -k } else { 1 }
-						mut arr := []VrlValue{len: target_len, init: VrlValue(VrlNull{})}
+						mut arr := []VrlValue{len: int(target_len), init: VrlValue(VrlNull{})}
 						arr[0] = val
 						return VrlValue(arr)
 					}
@@ -805,7 +805,7 @@ fn (mut rt Runtime) set_nested_path(parts []string, val VrlValue) {
 		if is_numeric {
 			idx := parts[1].int()
 			existing := rt.object.get(top) or { VrlValue([]VrlValue{}) }
-			new_val := set_in_container(existing, VrlValue(idx), val)
+			new_val := set_in_container(existing, VrlValue(i64(idx)), val)
 			rt.object.set(top, new_val)
 			return
 		}
@@ -863,7 +863,7 @@ fn (mut rt Runtime) set_deep_path(parts []string, val VrlValue) {
 	for i >= 1 {
 		if is_numeric_segment(parts[i]) {
 			idx := parts[i].int()
-			current = set_in_container(VrlValue([]VrlValue{}), VrlValue(idx), current)
+			current = set_in_container(VrlValue([]VrlValue{}), VrlValue(i64(idx)), current)
 		} else {
 			mut m := new_object_map()
 			m.set(parts[i], current)
@@ -918,7 +918,7 @@ fn (mut rt Runtime) merge_assign(target Expr, val VrlValue) ! {
 fn vrl_type_name(v VrlValue) string {
 	match v {
 		string { return 'string' }
-		int { return 'integer' }
+		i64 { return 'integer' }
 		f64 { return 'float' }
 		bool { return 'boolean' }
 		VrlNull { return 'null' }
@@ -934,16 +934,16 @@ fn arith_add(left VrlValue, right VrlValue) !VrlValue {
 	l := left
 	r := right
 	match l {
-		int {
+		i64 {
 			match r {
-				int { return VrlValue(l + r) }
+				i64 { return VrlValue(l + r) }
 				f64 { return VrlValue(f64(l) + r) }
 				else {}
 			}
 		}
 		f64 {
 			match r {
-				int { return VrlValue(l + f64(r)) }
+				i64 { return VrlValue(l + f64(r)) }
 				f64 { return VrlValue(l + r) }
 				else {}
 			}
@@ -976,9 +976,9 @@ fn arith_sub(left VrlValue, right VrlValue) !VrlValue {
 	l := left
 	r := right
 	match l {
-		int {
+		i64 {
 			match r {
-				int { return VrlValue(l - r) }
+				i64 { return VrlValue(l - r) }
 				f64 {
 					result := f64(l) - r
 					if is_nan(result) { return error("can't subtract type float from float") }
@@ -989,7 +989,7 @@ fn arith_sub(left VrlValue, right VrlValue) !VrlValue {
 		}
 		f64 {
 			match r {
-				int {
+				i64 {
 					result := l - f64(r)
 					if is_nan(result) { return error("can't subtract type float from float") }
 					return VrlValue(result)
@@ -1013,16 +1013,16 @@ fn arith_mul(left VrlValue, right VrlValue) !VrlValue {
 	l := left
 	r := right
 	match l {
-		int {
+		i64 {
 			match r {
-				int { return VrlValue(l * r) }
+				i64 { return VrlValue(l * r) }
 				f64 { return VrlValue(f64(l) * r) }
 				else {}
 			}
 		}
 		f64 {
 			match r {
-				int { return VrlValue(l * f64(r)) }
+				i64 { return VrlValue(l * f64(r)) }
 				f64 { return VrlValue(l * r) }
 				else {}
 			}
@@ -1030,17 +1030,17 @@ fn arith_mul(left VrlValue, right VrlValue) !VrlValue {
 		else {}
 	}
 	// String * int = repeat string
-	if l is string && r is int {
+	if l is string && r is i64 {
 		s := l as string
-		n := r as int
+		n := r as i64
 		if n <= 0 { return VrlValue('') }
 		mut result := ''
 		for _ in 0 .. n { result += s }
 		return VrlValue(result)
 	}
-	if l is int && r is string {
+	if l is i64 && r is string {
 		s := r as string
-		n := l as int
+		n := l as i64
 		if n <= 0 { return VrlValue('') }
 		mut result := ''
 		for _ in 0 .. n { result += s }
@@ -1050,23 +1050,23 @@ fn arith_mul(left VrlValue, right VrlValue) !VrlValue {
 }
 
 fn arith_div(left VrlValue, right VrlValue) !VrlValue {
-	if left is int {
-		if right is int {
-			divisor := right as int
+	if left is i64 {
+		if right is i64 {
+			divisor := right as i64
 			if divisor == 0 { return error("can't divide by zero") }
-			dividend := left as int
+			dividend := left as i64
 			// VRL integer division produces float
 			return VrlValue(f64(dividend) / f64(divisor))
 		}
 		if right is f64 {
 			r := right as f64
 			if r == 0.0 { return error("can't divide by zero") }
-			return VrlValue(f64(left as int) / r)
+			return VrlValue(f64(left as i64) / r)
 		}
 	}
 	if left is f64 {
-		if right is int {
-			divisor := right as int
+		if right is i64 {
+			divisor := right as i64
 			if divisor == 0 { return error("can't divide by zero") }
 			return VrlValue((left as f64) / f64(divisor))
 		}
@@ -1083,40 +1083,37 @@ fn arith_mod(left VrlValue, right VrlValue) !VrlValue {
 	l := left
 	r := right
 	match l {
-		int {
+		i64 {
 			match r {
-				int {
-					ri := int(r)
-					if ri == 0 { return error("can't calculate remainder with divisor of zero") }
-					li := int(l)
+				i64 {
+					if r == 0 { return error("can't calculate remainder with divisor of zero") }
 					// INT_MIN % -1 is UB in C, guard against SIGFPE
-					if ri == -1 { return VrlValue(0) }
-					v := li % ri
+					if r == -1 { return VrlValue(i64(0)) }
+					v := l % r
 					return VrlValue(v)
 				}
 				f64 {
 					rf := f64(r)
 					if rf == 0.0 { return error("can't calculate remainder with divisor of zero") }
-					lf := f64(int(l))
-					return VrlValue(lf - rf * f64(int(lf / rf)))
+					lf := f64(l)
+					return VrlValue(lf - rf * f64(i64(lf / rf)))
 				}
 				else {}
 			}
 		}
 		f64 {
 			match r {
-				int {
-					ri := int(r)
-					if ri == 0 { return error("can't calculate remainder with divisor of zero") }
+				i64 {
+					if r == 0 { return error("can't calculate remainder with divisor of zero") }
 					lf := f64(l)
-					rf := f64(ri)
-					return VrlValue(lf - rf * f64(int(lf / rf)))
+					rf := f64(r)
+					return VrlValue(lf - rf * f64(i64(lf / rf)))
 				}
 				f64 {
 					rf := f64(r)
 					if rf == 0.0 { return error("can't calculate remainder with divisor of zero") }
 					lf := f64(l)
-					return VrlValue(lf - rf * f64(int(lf / rf)))
+					return VrlValue(lf - rf * f64(i64(lf / rf)))
 				}
 				else {}
 			}
@@ -1128,7 +1125,7 @@ fn arith_mod(left VrlValue, right VrlValue) !VrlValue {
 
 fn negate_value(v VrlValue) !VrlValue {
 	match v {
-		int {
+		i64 {
 			neg := 0 - v
 			return VrlValue(neg)
 		}
@@ -1144,16 +1141,16 @@ fn compare_values_lt(left VrlValue, right VrlValue) !VrlValue {
 	l := left
 	r := right
 	match l {
-		int {
+		i64 {
 			match r {
-				int { return VrlValue(l < r) }
+				i64 { return VrlValue(l < r) }
 				f64 { return VrlValue(f64(l) < r) }
 				else {}
 			}
 		}
 		f64 {
 			match r {
-				int { return VrlValue(l < f64(r)) }
+				i64 { return VrlValue(l < f64(r)) }
 				f64 { return VrlValue(l < r) }
 				else {}
 			}
@@ -1179,16 +1176,16 @@ fn compare_values_gt(left VrlValue, right VrlValue) !VrlValue {
 	l := left
 	r := right
 	match l {
-		int {
+		i64 {
 			match r {
-				int { return VrlValue(l > r) }
+				i64 { return VrlValue(l > r) }
 				f64 { return VrlValue(f64(l) > r) }
 				else {}
 			}
 		}
 		f64 {
 			match r {
-				int { return VrlValue(l > f64(r)) }
+				i64 { return VrlValue(l > f64(r)) }
 				f64 { return VrlValue(l > r) }
 				else {}
 			}
@@ -1214,16 +1211,16 @@ fn compare_values_le(left VrlValue, right VrlValue) !VrlValue {
 	l := left
 	r := right
 	match l {
-		int {
+		i64 {
 			match r {
-				int { return VrlValue(l <= r) }
+				i64 { return VrlValue(l <= r) }
 				f64 { return VrlValue(f64(l) <= r) }
 				else {}
 			}
 		}
 		f64 {
 			match r {
-				int { return VrlValue(l <= f64(r)) }
+				i64 { return VrlValue(l <= f64(r)) }
 				f64 { return VrlValue(l <= r) }
 				else {}
 			}
@@ -1249,16 +1246,16 @@ fn compare_values_ge(left VrlValue, right VrlValue) !VrlValue {
 	l := left
 	r := right
 	match l {
-		int {
+		i64 {
 			match r {
-				int { return VrlValue(l >= r) }
+				i64 { return VrlValue(l >= r) }
 				f64 { return VrlValue(f64(l) >= r) }
 				else {}
 			}
 		}
 		f64 {
 			match r {
-				int { return VrlValue(l >= f64(r)) }
+				i64 { return VrlValue(l >= f64(r)) }
 				f64 { return VrlValue(l >= r) }
 				else {}
 			}
@@ -1286,7 +1283,7 @@ fn index_into(container VrlValue, index VrlValue) !VrlValue {
 	match c {
 		[]VrlValue {
 			match i {
-				int {
+				i64 {
 					idx := if i < 0 { c.len + i } else { i }
 					if idx >= 0 && idx < c.len {
 						return c[idx]

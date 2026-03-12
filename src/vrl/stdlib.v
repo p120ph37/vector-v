@@ -59,10 +59,10 @@ fn get_named_bool(named map[string]VrlValue, key string, default_val bool) bool 
 }
 
 // get_named_int gets an integer named argument with a default.
-fn get_named_int(named map[string]VrlValue, key string, default_val int) int {
+fn get_named_int(named map[string]VrlValue, key string, default_val i64) i64 {
 	if v := named[key] {
 		match v {
-			int { return v }
+			i64 { return v }
 			else { return default_val }
 		}
 	}
@@ -621,7 +621,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'strlen' { return fn_strlen([a0]) }
 			'strip_whitespace', 'trim' { return fn_strip_whitespace([a0]) }
 			'is_string' { return VrlValue(a0 is string) }
-			'is_integer' { return VrlValue(a0 is int) }
+			'is_integer' { return VrlValue(a0 is i64) }
 			'is_float' { return VrlValue(a0 is f64) }
 			'is_boolean' { return VrlValue(a0 is bool) }
 			'is_null' { return VrlValue(a0 is VrlNull) }
@@ -866,7 +866,7 @@ fn fn_to_string(args []VrlValue) !VrlValue {
 	a := args[0]
 	match a {
 		string { return VrlValue(a) }
-		int { return VrlValue('${a}') }
+		i64 { return VrlValue('${a}') }
 		f64 { return VrlValue(format_float(a)) }
 		bool {
 			s := if a { 'true' } else { 'false' }
@@ -973,9 +973,9 @@ fn fn_length(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('length requires 1 argument') }
 	a := args[0]
 	match a {
-		string { return VrlValue(a.len) }
-		[]VrlValue { return VrlValue(a.len) }
-		ObjectMap { return VrlValue(a.len()) }
+		string { return VrlValue(i64(a.len)) }
+		[]VrlValue { return VrlValue(i64(a.len)) }
+		ObjectMap { return VrlValue(i64(a.len())) }
 		else { return error('length requires string, array, or object') }
 	}
 }
@@ -1147,7 +1147,7 @@ fn fn_slice(args []VrlValue) !VrlValue {
 	if args.len < 2 { return error('slice requires at least 2 arguments') }
 	a1 := args[1]
 	start := match a1 {
-		int { a1 }
+		i64 { a1 }
 		else { return error('slice start must be integer') }
 	}
 	a0 := args[0]
@@ -1182,9 +1182,9 @@ fn fn_slice(args []VrlValue) !VrlValue {
 
 fn get_int_arg(v VrlValue, default_val int) int {
 	match v {
-		int {
-			if v < 0 { return default_val + v }
-			return v
+		i64 {
+			if v < 0 { return default_val + int(v) }
+			return int(v)
 		}
 		else { return default_val }
 	}
@@ -1194,7 +1194,7 @@ fn fn_strlen(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('strlen requires 1 argument') }
 	a := args[0]
 	match a {
-		string { return VrlValue(a.runes().len) }
+		string { return VrlValue(i64(a.runes().len)) }
 		else { return error('strlen requires a string') }
 	}
 }
@@ -1208,8 +1208,8 @@ fn fn_truncate(args []VrlValue) !VrlValue {
 		else { return error('truncate first arg must be string') }
 	}
 	max_len := match a1 {
-		int { a1 }
-		f64 { int(a1) }
+		i64 { a1 }
+		f64 { i64(a1) }
 		else { return error('truncate second arg must be integer') }
 	}
 	mut suffix := ''
@@ -1231,16 +1231,16 @@ fn fn_to_int(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('to_int requires 1 argument') }
 	a := args[0]
 	match a {
-		int { return VrlValue(a) }
-		f64 { return VrlValue(int(a)) }
+		i64 { return VrlValue(a) }
+		f64 { return VrlValue(i64(a)) }
 		bool {
-			v := if a { 1 } else { 0 }
+			v := if a { i64(1) } else { i64(0) }
 			return VrlValue(v)
 		}
-		string { return VrlValue(a.int()) }
-		VrlNull { return VrlValue(0) }
+		string { return VrlValue(a.i64()) }
+		VrlNull { return VrlValue(i64(0)) }
 		Timestamp {
-			return VrlValue(int(a.t.unix()))
+			return VrlValue(i64(a.t.unix()))
 		}
 		else { return error("can't convert to integer") }
 	}
@@ -1251,7 +1251,7 @@ fn fn_to_float(args []VrlValue) !VrlValue {
 	a := args[0]
 	match a {
 		f64 { return VrlValue(a) }
-		int { return VrlValue(f64(a)) }
+		i64 { return VrlValue(f64(a)) }
 		string { return VrlValue(a.f64()) }
 		bool {
 			v := if a { 1.0 } else { 0.0 }
@@ -1282,7 +1282,7 @@ fn fn_to_bool(args []VrlValue) !VrlValue {
 			}
 			return error("can't convert to boolean")
 		}
-		int { return VrlValue(a != 0) }
+		i64 { return VrlValue(a != 0) }
 		f64 { return VrlValue(a != 0.0) }
 		VrlNull { return VrlValue(false) }
 		else { return error("can't convert to boolean") }
@@ -1303,7 +1303,7 @@ fn fn_is_type(args []VrlValue, type_name string) !VrlValue {
 	a := args[0]
 	result := match type_name {
 		'string' { a is string }
-		'integer' { a is int }
+		'integer' { a is i64 }
 		'float' { a is f64 }
 		'boolean' { a is bool }
 		'null' { a is VrlNull }
@@ -1862,7 +1862,7 @@ fn (mut rt Runtime) fn_filter(expr FnCallExpr) !VrlValue {
 				mut result := []VrlValue{}
 				for i, item in c {
 					if closure_expr.params.len > 0 {
-						rt.vars.set(closure_expr.params[0].trim_left('_'), VrlValue(i))
+						rt.vars.set(closure_expr.params[0].trim_left('_'), VrlValue(i64(i)))
 					}
 					if closure_expr.params.len > 1 {
 						rt.vars.set(closure_expr.params[1].trim_left('_'), item)
@@ -1911,7 +1911,7 @@ fn (mut rt Runtime) fn_for_each(expr FnCallExpr) !VrlValue {
 			[]VrlValue {
 				for i, item in c {
 					if closure_expr.params.len > 0 {
-						rt.vars.set(closure_expr.params[0].trim_left('_'), VrlValue(i))
+						rt.vars.set(closure_expr.params[0].trim_left('_'), VrlValue(i64(i)))
 					}
 					if closure_expr.params.len > 1 {
 						rt.vars.set(closure_expr.params[1].trim_left('_'), item)
@@ -2152,7 +2152,7 @@ fn parse_json_with_depth(s string, max_depth int, current_depth int) !VrlValue {
 	}
 	if trimmed[0].is_digit() || (trimmed[0] == `-` && trimmed.len > 1) {
 		if trimmed.contains('.') { return VrlValue(trimmed.f64()) }
-		return VrlValue(trimmed.int())
+		return VrlValue(trimmed.i64())
 	}
 	if current_depth >= max_depth {
 		// At max depth, return the raw JSON string
@@ -2210,7 +2210,7 @@ fn parse_json_recursive(s string) !VrlValue {
 			fv := trimmed.f64()
 			return VrlValue(fv)
 		}
-		iv := trimmed.int()
+		iv := trimmed.i64()
 		return VrlValue(iv)
 	}
 	if trimmed.starts_with('[') {
@@ -2378,7 +2378,7 @@ fn fn_abs(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('abs requires 1 argument') }
 	a := args[0]
 	match a {
-		int {
+		i64 {
 			v := if a < 0 { -a } else { a }
 			return VrlValue(v)
 		}
@@ -2394,8 +2394,8 @@ fn fn_ceil(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('ceil requires 1 argument') }
 	precision := if args.len > 1 {
 		p := args[1]
-		match p { int { p } else { 0 } }
-	} else { 0 }
+		match p { i64 { p } else { i64(0) } }
+	} else { i64(0) }
 	a := args[0]
 	match a {
 		f64 {
@@ -2404,9 +2404,9 @@ fn fn_ceil(args []VrlValue) !VrlValue {
 				for _ in 0 .. precision { mult *= 10.0 }
 				return VrlValue(math.ceil(a * mult) / mult)
 			}
-			return VrlValue(int(math.ceil(a)))
+			return VrlValue(i64(math.ceil(a)))
 		}
-		int {
+		i64 {
 			if precision > 0 { return VrlValue(f64(a)) }
 			return VrlValue(a)
 		}
@@ -2418,8 +2418,8 @@ fn fn_floor(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('floor requires 1 argument') }
 	precision := if args.len > 1 {
 		p := args[1]
-		match p { int { p } else { 0 } }
-	} else { 0 }
+		match p { i64 { p } else { i64(0) } }
+	} else { i64(0) }
 	a := args[0]
 	match a {
 		f64 {
@@ -2428,9 +2428,9 @@ fn fn_floor(args []VrlValue) !VrlValue {
 				for _ in 0 .. precision { mult *= 10.0 }
 				return VrlValue(math.floor(a * mult) / mult)
 			}
-			return VrlValue(int(math.floor(a)))
+			return VrlValue(i64(math.floor(a)))
 		}
-		int {
+		i64 {
 			if precision > 0 { return VrlValue(f64(a)) }
 			return VrlValue(a)
 		}
@@ -2443,7 +2443,7 @@ fn fn_round(args []VrlValue) !VrlValue {
 	precision := if args.len > 1 {
 		p := args[1]
 		match p {
-			int { p }
+			i64 { p }
 			else { 0 }
 		}
 	} else { 0 }
@@ -2451,13 +2451,13 @@ fn fn_round(args []VrlValue) !VrlValue {
 	match a {
 		f64 {
 			if precision == 0 {
-				return VrlValue(int(a + 0.5))
+				return VrlValue(i64(a + 0.5))
 			}
 			mut mult := 1.0
 			for _ in 0 .. precision { mult *= 10.0 }
-			return VrlValue(f64(int(a * mult + 0.5)) / mult)
+			return VrlValue(f64(i64(a * mult + 0.5)) / mult)
 		}
-		int { return VrlValue(a) }
+		i64 { return VrlValue(a) }
 		else { return error('round requires a number') }
 	}
 }
@@ -2614,7 +2614,7 @@ fn fn_find(args []VrlValue) !VrlValue {
 	from := if args.len > 2 {
 		a2 := args[2]
 		match a2 {
-			int { a2 }
+			i64 { a2 }
 			else { 0 }
 		}
 	} else {
@@ -2626,13 +2626,13 @@ fn fn_find(args []VrlValue) !VrlValue {
 		VrlRegex {
 			re := pcre.compile(normalize_regex_pattern(a1v.pattern)) or { return VrlValue(VrlNull{}) }
 			if m := re.find(search_str) {
-				return VrlValue(m.start + from)
+				return VrlValue(i64(m.start) + from)
 			}
 			return VrlValue(VrlNull{})
 		}
 		string {
 			idx := search_str.index(a1v) or { return VrlValue(VrlNull{}) }
-			return VrlValue(idx + from)
+			return VrlValue(i64(idx) + from)
 		}
 		else { return error('find second arg must be string or regex') }
 	}
@@ -2673,7 +2673,7 @@ fn get_nested(container VrlValue, segments []VrlValue) !VrlValue {
 			s := seg
 			key := match s {
 				string { s }
-				int { '${s}' }
+				i64 { '${s}' }
 				else { return VrlValue(VrlNull{}) }
 			}
 			val := c.get(key) or { return VrlValue(VrlNull{}) }
@@ -2682,7 +2682,7 @@ fn get_nested(container VrlValue, segments []VrlValue) !VrlValue {
 		[]VrlValue {
 			s := seg
 			idx := match s {
-				int { if s < 0 { c.len + s } else { s } }
+				i64 { if s < 0 { c.len + s } else { s } }
 				string {
 					// Only numeric strings are valid array indices
 					if s.len > 0 && (s[0].is_digit() || (s[0] == `-` && s.len > 1)) {
@@ -2721,7 +2721,7 @@ fn set_nested(container VrlValue, segments []VrlValue, value VrlValue) !VrlValue
 			s := seg
 			key := match s {
 				string { s }
-				int { '${s}' }
+				i64 { '${s}' }
 				else { return container }
 			}
 			existing := c.get(key) or { VrlValue(VrlNull{}) }
@@ -2748,7 +2748,7 @@ fn set_nested(container VrlValue, segments []VrlValue, value VrlValue) !VrlValue
 				return VrlValue(obj)
 			}
 			idx := match s {
-				int { s }
+				i64 { s }
 				string { s.int() }
 				else { return container }
 			}
@@ -2784,7 +2784,7 @@ fn set_nested(container VrlValue, segments []VrlValue, value VrlValue) !VrlValue
 					obj.set(s, new_val)
 					return VrlValue(obj)
 				}
-				int {
+				i64 {
 					mut arr := []VrlValue{}
 					idx := if s < 0 { 0 } else { s }
 					for arr.len <= idx {
@@ -2834,7 +2834,7 @@ fn fn_from_unix_timestamp(args []VrlValue) !VrlValue {
 	if args.len < 1 { return error('from_unix_timestamp requires 1 argument') }
 	a := args[0]
 	match a {
-		int {
+		i64 {
 			unit := if args.len > 1 {
 				u := args[1]
 				match u { string { u } else { 'seconds' } }
@@ -2847,19 +2847,19 @@ fn fn_from_unix_timestamp(args []VrlValue) !VrlValue {
 				'milliseconds' {
 					secs := a / 1000
 					micro := (a % 1000) * 1000
-					t := time.unix_microsecond(secs, micro)
+					t := time.unix_microsecond(int(secs), int(micro))
 					return VrlValue(Timestamp{t: t})
 				}
 				'microseconds' {
 					secs := a / 1_000_000
 					micro := a % 1_000_000
-					t := time.unix_microsecond(secs, micro)
+					t := time.unix_microsecond(int(secs), int(micro))
 					return VrlValue(Timestamp{t: t})
 				}
 				'nanoseconds' {
 					secs := a / 1_000_000_000
 					micro := (a % 1_000_000_000) / 1000
-					t := time.unix_microsecond(secs, micro)
+					t := time.unix_microsecond(int(secs), int(micro))
 					return VrlValue(Timestamp{t: t})
 				}
 				else {
@@ -2876,7 +2876,7 @@ fn fn_format_number(args []VrlValue) !VrlValue {
 	a := args[0]
 	val := match a {
 		f64 { a }
-		int { f64(a) }
+		i64 { f64(a) }
 		else { return error('format_number requires a number') }
 	}
 	scale := if args.len > 1 { get_int_arg(args[1], -1) } else { -1 }
@@ -3013,19 +3013,19 @@ fn fn_to_unix_timestamp(args []VrlValue) !VrlValue {
 			} else { 'seconds' }
 			match unit {
 				'seconds' {
-					return VrlValue(int(a.t.unix()))
+					return VrlValue(i64(a.t.unix()))
 				}
 				'milliseconds' {
 					ms := a.t.unix_micro() / 1000
-					return if ms > 0x7FFFFFFF || ms < -0x7FFFFFFF { VrlValue(f64(ms)) } else { VrlValue(int(ms)) }
+					return VrlValue(i64(ms))
 				}
 				'microseconds' {
 					us := a.t.unix_micro()
-					return if us > 0x7FFFFFFF || us < -0x7FFFFFFF { VrlValue(f64(us)) } else { VrlValue(int(us)) }
+					return VrlValue(i64(us))
 				}
 				'nanoseconds' {
 					ns := a.t.unix_micro() * 1000
-					return if ns > 0x7FFFFFFF || ns < -0x7FFFFFFF { VrlValue(f64(ns)) } else { VrlValue(int(ns)) }
+					return VrlValue(i64(ns))
 				}
 				else {
 					return error('unknown unit: ${unit}')

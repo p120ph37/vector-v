@@ -376,7 +376,7 @@ fn parse_url_string(s string) !VrlValue {
 		possible_port := remaining[colon_idx + 1..]
 		if possible_port.len > 0 && possible_port.bytes().all(it.is_digit()) {
 			host = remaining[..colon_idx]
-			port = VrlValue(possible_port.int())
+			port = VrlValue(possible_port.i64())
 		}
 	}
 	result.set('host', VrlValue(host))
@@ -624,7 +624,7 @@ fn fn_parse_int(args []VrlValue) !VrlValue {
 	base_val := if args.len > 1 {
 		a1 := args[1]
 		match a1 {
-			int { a1 }
+			i64 { a1 }
 			else { 10 }
 		}
 	} else {
@@ -661,13 +661,13 @@ fn fn_parse_int(args []VrlValue) !VrlValue {
 	}
 	mut result := i64(0)
 	for c in str.bytes() {
-		digit := char_to_digit(c, base) or { return error('invalid digit in base ${base}: ${s}') }
+		digit := char_to_digit(c, int(base)) or { return error('invalid digit in base ${base}: ${s}') }
 		result = result * base + digit
 	}
 	if negative {
 		result = -result
 	}
-	return VrlValue(int(result))
+	return VrlValue(i64(result))
 }
 
 fn char_to_digit(c u8, base int) !i64 {
@@ -695,7 +695,7 @@ fn fn_parse_float(args []VrlValue) !VrlValue {
 	match a {
 		string { return VrlValue(a.f64()) }
 		f64 { return VrlValue(a) }
-		int { return VrlValue(f64(a)) }
+		i64 { return VrlValue(f64(a)) }
 		else { return error('parse_float requires a string') }
 	}
 }
@@ -707,13 +707,13 @@ fn fn_format_int(args []VrlValue) !VrlValue {
 	}
 	a := args[0]
 	val := match a {
-		int { a }
+		i64 { a }
 		else { return error('format_int requires an integer') }
 	}
 	base := if args.len > 1 {
 		b := args[1]
 		match b {
-			int { b }
+			i64 { b }
 			else { 10 }
 		}
 	} else {
@@ -722,7 +722,7 @@ fn fn_format_int(args []VrlValue) !VrlValue {
 	if base < 2 || base > 36 {
 		return error('base must be between 2 and 36')
 	}
-	return VrlValue(int_to_base(val, base))
+	return VrlValue(int_to_base(int(val), int(base)))
 }
 
 fn int_to_base(val int, base int) string {

@@ -66,7 +66,7 @@ pub fn (t &RemapTransform) transform(e event.Event) ![]event.Event {
 fn event_value_to_vrl(v event.Value) vrl.VrlValue {
 	match v {
 		string { return vrl.VrlValue(v) }
-		int { return vrl.VrlValue(v) }
+		int { return vrl.VrlValue(i64(v)) }
 		event.Float { return vrl.VrlValue(f64(v)) }
 		bool { return vrl.VrlValue(v) }
 		[]event.Value {
@@ -93,7 +93,7 @@ fn event_value_to_vrl(v event.Value) vrl.VrlValue {
 fn vrl_value_to_event(v vrl.VrlValue) event.Value {
 	match v {
 		string { return event.Value(v) }
-		int { return event.Value(v) }
+		i64 { return event.Value(int(v)) }
 		f64 { return event.Value(event.Float(v)) }
 		bool { return event.Value(v) }
 		[]vrl.VrlValue {

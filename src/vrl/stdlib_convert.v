@@ -7,7 +7,7 @@ fn fn_to_syslog_level(args []VrlValue) !VrlValue {
 	}
 	a := args[0]
 	severity := match a {
-		int { a }
+		i64 { a }
 		else { return error('to_syslog_level requires an integer') }
 	}
 	level := match severity {
@@ -45,7 +45,7 @@ fn fn_to_syslog_severity(args []VrlValue) !VrlValue {
 		'debug' { 7 }
 		else { return error('invalid syslog level: ${level}') }
 	}
-	return VrlValue(severity)
+	return VrlValue(i64(severity))
 }
 
 // to_syslog_facility(value)
@@ -55,7 +55,7 @@ fn fn_to_syslog_facility(args []VrlValue) !VrlValue {
 	}
 	a := args[0]
 	code := match a {
-		int { a }
+		i64 { a }
 		else { return error('to_syslog_facility requires an integer') }
 	}
 	facility := match code {
@@ -125,5 +125,5 @@ fn fn_to_syslog_facility_code(args []VrlValue) !VrlValue {
 		'local7' { 23 }
 		else { return error('invalid syslog facility: ${facility}') }
 	}
-	return VrlValue(code)
+	return VrlValue(i64(code))
 }
