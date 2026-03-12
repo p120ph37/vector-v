@@ -353,12 +353,14 @@ fn (mut rt Runtime) eval_fn_call_named(name string, expr FnCallExpr) !VrlValue {
 		'parse_regex' {
 			value := if v := named['value'] { v } else if pos.len > 0 { pos[0] } else { return error('parse_regex requires value') }
 			pattern := if v := named['pattern'] { v } else if pos.len > 1 { pos[1] } else { return error('parse_regex requires pattern') }
-			return fn_parse_regex([value, pattern])
+			ng := VrlValue(get_named_bool(named, 'numeric_groups', false))
+			return fn_parse_regex([value, pattern, ng])
 		}
 		'parse_regex_all' {
 			value := if v := named['value'] { v } else if pos.len > 0 { pos[0] } else { return error('parse_regex_all requires value') }
 			pattern := if v := named['pattern'] { v } else if pos.len > 1 { pos[1] } else { return error('parse_regex_all requires pattern') }
-			return fn_parse_regex_all([value, pattern])
+			ng := VrlValue(get_named_bool(named, 'numeric_groups', false))
+			return fn_parse_regex_all([value, pattern, ng])
 		}
 		'ip_cidr_contains' {
 			cidr := if v := named['cidr'] { v } else if pos.len > 0 { pos[0] } else { return error('ip_cidr_contains requires cidr') }
