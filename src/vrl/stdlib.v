@@ -254,6 +254,149 @@ fn (mut rt Runtime) eval_fn_call_named(name string, expr FnCallExpr) !VrlValue {
 			value := if v := named['value'] { v } else if pos.len > 0 { pos[0] } else { return error('unique requires value argument') }
 			return fn_unique([value])
 		}
+		'encode_base64' {
+			if pos.len < 1 { return error('encode_base64 requires 1 argument') }
+			padding := VrlValue(get_named_bool(named, 'padding', true))
+			charset := VrlValue(get_named_string(named, 'charset', 'standard'))
+			return fn_encode_base64([pos[0], padding, charset])
+		}
+		'decode_base64' {
+			if pos.len < 1 { return error('decode_base64 requires 1 argument') }
+			charset := VrlValue(get_named_string(named, 'charset', 'standard'))
+			return fn_decode_base64([pos[0], charset])
+		}
+		'encode_percent' {
+			if pos.len < 1 { return error('encode_percent requires 1 argument') }
+			ascii_set := VrlValue(get_named_string(named, 'ascii_set', 'NON_ALPHANUMERIC'))
+			return fn_encode_percent([pos[0], ascii_set])
+		}
+		'encode_key_value' {
+			if pos.len < 1 { return error('encode_key_value requires 1 argument') }
+			fields_ordering := if v := named['fields_ordering'] { v } else { VrlValue([]VrlValue{}) }
+			kv_delim := VrlValue(get_named_string(named, 'key_value_delimiter', '='))
+			field_delim := VrlValue(get_named_string(named, 'field_delimiter', ' '))
+			flatten_bool := VrlValue(get_named_bool(named, 'flatten_boolean', false))
+			return fn_encode_key_value([pos[0], fields_ordering, kv_delim, field_delim, flatten_bool])
+		}
+		'encode_csv' {
+			if pos.len < 1 { return error('encode_csv requires 1 argument') }
+			delimiter := VrlValue(get_named_string(named, 'delimiter', ','))
+			return fn_encode_csv([pos[0], delimiter])
+		}
+		'parse_key_value' {
+			if pos.len < 1 { return error('parse_key_value requires 1 argument') }
+			kv_delim := VrlValue(get_named_string(named, 'key_value_delimiter', '='))
+			field_delim := VrlValue(get_named_string(named, 'field_delimiter', ' '))
+			whitespace := VrlValue(get_named_string(named, 'whitespace', 'lenient'))
+			accept_standalone := VrlValue(get_named_bool(named, 'accept_standalone_key', true))
+			return fn_parse_key_value([pos[0], kv_delim, field_delim, whitespace, accept_standalone])
+		}
+		'parse_csv' {
+			if pos.len < 1 { return error('parse_csv requires 1 argument') }
+			delimiter := VrlValue(get_named_string(named, 'delimiter', ','))
+			return fn_parse_csv([pos[0], delimiter])
+		}
+		'parse_duration' {
+			if pos.len < 1 { return error('parse_duration requires 1 argument') }
+			unit := if v := named['unit'] { v } else if pos.len > 1 { pos[1] } else { return error('parse_duration requires unit') }
+			return fn_parse_duration([pos[0], unit])
+		}
+		'parse_bytes' {
+			if pos.len < 1 { return error('parse_bytes requires 1 argument') }
+			unit := if v := named['unit'] { v } else if pos.len > 1 { pos[1] } else { VrlValue('b') }
+			base := if v := named['base'] { v } else if pos.len > 2 { pos[2] } else { VrlValue('2') }
+			return fn_parse_bytes([pos[0], unit, base])
+		}
+		'parse_timestamp' {
+			if pos.len < 1 { return error('parse_timestamp requires 1 argument') }
+			format := if v := named['format'] { v } else if pos.len > 1 { pos[1] } else { return error('parse_timestamp requires format') }
+			return fn_parse_timestamp([pos[0], format])
+		}
+		'format_timestamp' {
+			if pos.len < 1 { return error('format_timestamp requires 1 argument') }
+			format := if v := named['format'] { v } else if pos.len > 1 { pos[1] } else { return error('format_timestamp requires format') }
+			tz_val := if v := named['timezone'] { v } else if pos.len > 2 { pos[2] } else { VrlValue('UTC') }
+			return fn_format_timestamp([pos[0], format, tz_val])
+		}
+		'sha2' {
+			if pos.len < 1 { return error('sha2 requires 1 argument') }
+			variant := if v := named['variant'] { v } else if pos.len > 1 { pos[1] } else { VrlValue('SHA-512/256') }
+			return fn_sha2([pos[0], variant])
+		}
+		'hmac' {
+			if pos.len < 2 { return error('hmac requires 2 arguments') }
+			algo := if v := named['algorithm'] { v } else if pos.len > 2 { pos[2] } else { VrlValue('SHA-256') }
+			return fn_hmac([pos[0], pos[1], algo])
+		}
+		'sieve' {
+			if pos.len < 1 { return error('sieve requires at least 1 argument') }
+			pattern_val := if v := named['permitted_characters'] { v } else if pos.len > 1 { pos[1] } else { return error('sieve requires a pattern') }
+			replace_single := VrlValue(get_named_string(named, 'replace_single', ''))
+			replace_repeated := VrlValue(get_named_string(named, 'replace_repeated', ''))
+			return fn_sieve([pos[0], pattern_val, replace_single, replace_repeated])
+		}
+		'shannon_entropy' {
+			if pos.len < 1 { return error('shannon_entropy requires 1 argument') }
+			seg := VrlValue(get_named_string(named, 'segmentation', 'byte'))
+			return fn_shannon_entropy([pos[0], seg])
+		}
+		'chunks' {
+			if pos.len < 2 { return error('chunks requires 2 arguments') }
+			return fn_chunks(pos)
+		}
+		'match_array' {
+			value := if v := named['value'] { v } else if pos.len > 0 { pos[0] } else { return error('match_array requires value') }
+			pattern := if v := named['pattern'] { v } else if pos.len > 1 { pos[1] } else { return error('match_array requires pattern') }
+			all := VrlValue(get_named_bool(named, 'all', false))
+			return fn_match_array([value, pattern, all])
+		}
+		'parse_regex' {
+			value := if v := named['value'] { v } else if pos.len > 0 { pos[0] } else { return error('parse_regex requires value') }
+			pattern := if v := named['pattern'] { v } else if pos.len > 1 { pos[1] } else { return error('parse_regex requires pattern') }
+			return fn_parse_regex([value, pattern])
+		}
+		'parse_regex_all' {
+			value := if v := named['value'] { v } else if pos.len > 0 { pos[0] } else { return error('parse_regex_all requires value') }
+			pattern := if v := named['pattern'] { v } else if pos.len > 1 { pos[1] } else { return error('parse_regex_all requires pattern') }
+			return fn_parse_regex_all([value, pattern])
+		}
+		'ip_cidr_contains' {
+			cidr := if v := named['cidr'] { v } else if pos.len > 0 { pos[0] } else { return error('ip_cidr_contains requires cidr') }
+			ip := if v := named['ip'] { v } else if pos.len > 1 { pos[1] } else { return error('ip_cidr_contains requires ip') }
+			return fn_ip_cidr_contains([cidr, ip])
+		}
+		'parse_url' {
+			if pos.len < 1 { return error('parse_url requires 1 argument') }
+			return fn_parse_url(pos)
+		}
+		'parse_query_string' {
+			if pos.len < 1 { return error('parse_query_string requires 1 argument') }
+			return fn_parse_query_string(pos)
+		}
+		'basename' {
+			if pos.len < 1 { return error('basename requires 1 argument') }
+			return fn_basename(pos)
+		}
+		'remove' {
+			value := if v := named['value'] { v } else if pos.len > 0 { pos[0] } else { return error('remove requires value') }
+			path := if v := named['path'] { v } else if pos.len > 1 { pos[1] } else { return error('remove requires path') }
+			compact := VrlValue(get_named_bool(named, 'compact', false))
+			return fn_remove([value, path, compact])
+		}
+		'object_from_array' {
+			values := if v := named['values'] { v } else if pos.len > 0 { pos[0] } else { return error('object_from_array requires values') }
+			if keys := named['keys'] {
+				return fn_object_from_array([values, keys])
+			}
+			return fn_object_from_array([values])
+		}
+		'tag_types_externally' {
+			if pos.len < 1 { return error('tag_types_externally requires 1 argument') }
+			return fn_tag_types_externally(pos)
+		}
+		'uuid_v7' {
+			return fn_uuid_v7(pos)
+		}
 		else {
 			// Fallback: pass all positional args to the general dispatch
 			mut all_args := pos.clone()
@@ -329,6 +472,89 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'now' { return VrlValue(Timestamp{t: time.now()}) }
 		'uuid_v4' { return fn_uuid_v4() }
 		'get_env_var' { return fn_get_env_var(args) }
+		// Codec
+		'encode_base64' { return fn_encode_base64(args) }
+		'decode_base64' { return fn_decode_base64(args) }
+		'encode_base16' { return fn_encode_base16(args) }
+		'decode_base16' { return fn_decode_base16(args) }
+		'encode_percent' { return fn_encode_percent(args) }
+		'decode_percent' { return fn_decode_percent(args) }
+		'encode_csv' { return fn_encode_csv(args) }
+		'encode_key_value' { return fn_encode_key_value(args) }
+		'encode_logfmt' { return fn_encode_logfmt(args) }
+		// Crypto
+		'sha1' { return fn_sha1(args) }
+		'sha2' { return fn_sha2(args) }
+		'sha3' { return fn_sha3(args) }
+		'md5' { return fn_md5(args) }
+		'hmac' { return fn_hmac(args) }
+		// String
+		'camelcase' { return fn_camelcase(args) }
+		'pascalcase' { return fn_pascalcase(args) }
+		'snakecase' { return fn_snakecase(args) }
+		'kebabcase' { return fn_kebabcase(args) }
+		'screamingsnakecase' { return fn_screamingsnakecase(args) }
+		'basename' { return fn_basename(args) }
+		'dirname' { return fn_dirname(args) }
+		'split_path' { return fn_split_path(args) }
+		'strip_ansi_escape_codes' { return fn_strip_ansi_escape_codes(args) }
+		'shannon_entropy' { return fn_shannon_entropy(args) }
+		'sieve' { return fn_sieve(args) }
+		// Parse
+		'parse_regex' { return fn_parse_regex(args) }
+		'parse_regex_all' { return fn_parse_regex_all(args) }
+		'parse_key_value' { return fn_parse_key_value(args) }
+		'parse_csv' { return fn_parse_csv(args) }
+		'parse_url' { return fn_parse_url(args) }
+		'parse_query_string' { return fn_parse_query_string(args) }
+		'parse_tokens' { return fn_parse_tokens(args) }
+		'parse_duration' { return fn_parse_duration(args) }
+		'parse_bytes' { return fn_parse_bytes(args) }
+		'parse_int' { return fn_parse_int(args) }
+		'parse_float' { return fn_parse_float(args) }
+		'format_int' { return fn_format_int(args) }
+		'parse_timestamp' { return fn_parse_timestamp(args) }
+		'format_timestamp' { return fn_format_timestamp(args) }
+		// Type
+		'is_empty' { return fn_is_empty(args) }
+		'is_json' { return fn_is_json(args) }
+		'is_regex' { return fn_is_regex(args) }
+		'is_timestamp' { return fn_is_timestamp(args) }
+		'is_ipv4' { return fn_is_ipv4(args) }
+		'is_ipv6' { return fn_is_ipv6(args) }
+		'timestamp' { return fn_timestamp(args) }
+		'tag_types_externally' { return fn_tag_types_externally(args) }
+		// Enumerate
+		'tally' { return fn_tally(args) }
+		'tally_value' { return fn_tally_value(args) }
+		'match_array' { return fn_match_array(args) }
+		// IP
+		'ip_aton' { return fn_ip_aton(args) }
+		'ip_ntoa' { return fn_ip_ntoa(args) }
+		'ip_cidr_contains' { return fn_ip_cidr_contains(args) }
+		'ip_subnet' { return fn_ip_subnet(args) }
+		'ip_to_ipv6' { return fn_ip_to_ipv6(args) }
+		'ipv6_to_ipv4' { return fn_ipv6_to_ipv4(args) }
+		'ip_version' { return fn_ip_version(args) }
+		// Convert
+		'to_syslog_level' { return fn_to_syslog_level(args) }
+		'to_syslog_severity' { return fn_to_syslog_severity(args) }
+		'to_syslog_facility' { return fn_to_syslog_facility(args) }
+		'to_syslog_facility_code' { return fn_to_syslog_facility_code(args) }
+		// Object
+		'unnest' { return fn_unnest(args) }
+		'object_from_array' { return fn_object_from_array(args) }
+		'zip' { return fn_zip(args) }
+		'remove' { return fn_remove(args) }
+		// Array
+		'chunks' { return fn_chunks(args) }
+		// Random
+		'random_int' { return fn_random_int(args) }
+		'random_float' { return fn_random_float(args) }
+		'random_bool' { return fn_random_bool() }
+		'random_bytes' { return fn_random_bytes(args) }
+		'uuid_v7' { return fn_uuid_v7(args) }
+		'get_hostname' { return fn_get_hostname() }
 		else { return error('unknown function: ${name}') }
 	}
 }
@@ -359,6 +585,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 	if name == 'for_each' { return rt.fn_for_each(expr) }
 	if name == 'map_keys' { return rt.fn_map_keys(expr) }
 	if name == 'map_values' { return rt.fn_map_values(expr) }
+	if name == 'replace_with' { return rt.fn_replace_with(expr) }
 
 	// If any args are named, use named-arg dispatch
 	has_named := expr.arg_names.len > 0 && expr.arg_names.any(it.len > 0)
@@ -414,6 +641,41 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'round' { return fn_round([a0]) }
 			'array' { return fn_ensure_array([a0]) }
 			'object' { return fn_ensure_object([a0]) }
+			'is_empty' { return fn_is_empty([a0]) }
+			'is_regex' { return fn_is_regex([a0]) }
+			'is_timestamp' { return fn_is_timestamp([a0]) }
+			'timestamp' { return fn_timestamp([a0]) }
+			'camelcase' { return fn_camelcase([a0]) }
+			'pascalcase' { return fn_pascalcase([a0]) }
+			'snakecase' { return fn_snakecase([a0]) }
+			'kebabcase' { return fn_kebabcase([a0]) }
+			'screamingsnakecase' { return fn_screamingsnakecase([a0]) }
+			'basename' { return fn_basename([a0]) }
+			'dirname' { return fn_dirname([a0]) }
+			'split_path' { return fn_split_path([a0]) }
+			'strip_ansi_escape_codes' { return fn_strip_ansi_escape_codes([a0]) }
+			'encode_base64' { return fn_encode_base64([a0]) }
+			'decode_base64' { return fn_decode_base64([a0]) }
+			'encode_base16' { return fn_encode_base16([a0]) }
+			'decode_base16' { return fn_decode_base16([a0]) }
+			'encode_percent' { return fn_encode_percent([a0]) }
+			'decode_percent' { return fn_decode_percent([a0]) }
+			'encode_logfmt' { return fn_encode_logfmt([a0]) }
+			'encode_csv' { return fn_encode_csv([a0]) }
+			'sha1' { return fn_sha1([a0]) }
+			'md5' { return fn_md5([a0]) }
+			'parse_float' { return fn_parse_float([a0]) }
+			'tag_types_externally' { return fn_tag_types_externally([a0]) }
+			'tally' { return fn_tally([a0]) }
+			'tally_value' { return fn_tally_value([a0]) }
+			'parse_tokens' { return fn_parse_tokens([a0]) }
+			'parse_url' { return fn_parse_url([a0]) }
+			'parse_query_string' { return fn_parse_query_string([a0]) }
+			'parse_bytes' { return fn_parse_bytes([a0]) }
+			'unnest' { return fn_unnest([a0]) }
+			'is_ipv4' { return fn_is_ipv4([a0]) }
+			'is_ipv6' { return fn_is_ipv6([a0]) }
+			'ip_version' { return fn_ip_version([a0]) }
 			// map_keys and map_values are handled above as special functions
 			else {}
 		}
@@ -511,6 +773,89 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		'to_regex' { return fn_to_regex(args) }
 		'log' { return VrlValue(VrlNull{}) }  // log() is a no-op in our runtime
 		'from_unix_timestamp' { return fn_from_unix_timestamp(args) }
+		// Codec
+		'encode_base64' { return fn_encode_base64(args) }
+		'decode_base64' { return fn_decode_base64(args) }
+		'encode_base16' { return fn_encode_base16(args) }
+		'decode_base16' { return fn_decode_base16(args) }
+		'encode_percent' { return fn_encode_percent(args) }
+		'decode_percent' { return fn_decode_percent(args) }
+		'encode_csv' { return fn_encode_csv(args) }
+		'encode_key_value' { return fn_encode_key_value(args) }
+		'encode_logfmt' { return fn_encode_logfmt(args) }
+		// Crypto
+		'sha1' { return fn_sha1(args) }
+		'sha2' { return fn_sha2(args) }
+		'sha3' { return fn_sha3(args) }
+		'md5' { return fn_md5(args) }
+		'hmac' { return fn_hmac(args) }
+		// String
+		'camelcase' { return fn_camelcase(args) }
+		'pascalcase' { return fn_pascalcase(args) }
+		'snakecase' { return fn_snakecase(args) }
+		'kebabcase' { return fn_kebabcase(args) }
+		'screamingsnakecase' { return fn_screamingsnakecase(args) }
+		'basename' { return fn_basename(args) }
+		'dirname' { return fn_dirname(args) }
+		'split_path' { return fn_split_path(args) }
+		'strip_ansi_escape_codes' { return fn_strip_ansi_escape_codes(args) }
+		'shannon_entropy' { return fn_shannon_entropy(args) }
+		'sieve' { return fn_sieve(args) }
+		// Parse
+		'parse_regex' { return fn_parse_regex(args) }
+		'parse_regex_all' { return fn_parse_regex_all(args) }
+		'parse_key_value' { return fn_parse_key_value(args) }
+		'parse_csv' { return fn_parse_csv(args) }
+		'parse_url' { return fn_parse_url(args) }
+		'parse_query_string' { return fn_parse_query_string(args) }
+		'parse_tokens' { return fn_parse_tokens(args) }
+		'parse_duration' { return fn_parse_duration(args) }
+		'parse_bytes' { return fn_parse_bytes(args) }
+		'parse_int' { return fn_parse_int(args) }
+		'parse_float' { return fn_parse_float(args) }
+		'format_int' { return fn_format_int(args) }
+		'parse_timestamp' { return fn_parse_timestamp(args) }
+		'format_timestamp' { return fn_format_timestamp(args) }
+		// Type
+		'is_empty' { return fn_is_empty(args) }
+		'is_json' { return fn_is_json(args) }
+		'is_regex' { return fn_is_regex(args) }
+		'is_timestamp' { return fn_is_timestamp(args) }
+		'is_ipv4' { return fn_is_ipv4(args) }
+		'is_ipv6' { return fn_is_ipv6(args) }
+		'timestamp' { return fn_timestamp(args) }
+		'tag_types_externally' { return fn_tag_types_externally(args) }
+		// Enumerate
+		'tally' { return fn_tally(args) }
+		'tally_value' { return fn_tally_value(args) }
+		'match_array' { return fn_match_array(args) }
+		// IP
+		'ip_aton' { return fn_ip_aton(args) }
+		'ip_ntoa' { return fn_ip_ntoa(args) }
+		'ip_cidr_contains' { return fn_ip_cidr_contains(args) }
+		'ip_subnet' { return fn_ip_subnet(args) }
+		'ip_to_ipv6' { return fn_ip_to_ipv6(args) }
+		'ipv6_to_ipv4' { return fn_ipv6_to_ipv4(args) }
+		'ip_version' { return fn_ip_version(args) }
+		// Convert
+		'to_syslog_level' { return fn_to_syslog_level(args) }
+		'to_syslog_severity' { return fn_to_syslog_severity(args) }
+		'to_syslog_facility' { return fn_to_syslog_facility(args) }
+		'to_syslog_facility_code' { return fn_to_syslog_facility_code(args) }
+		// Object
+		'unnest' { return fn_unnest(args) }
+		'object_from_array' { return fn_object_from_array(args) }
+		'zip' { return fn_zip(args) }
+		'remove' { return fn_remove(args) }
+		// Array
+		'chunks' { return fn_chunks(args) }
+		// Random
+		'random_int' { return fn_random_int(args) }
+		'random_float' { return fn_random_float(args) }
+		'random_bool' { return fn_random_bool() }
+		'random_bytes' { return fn_random_bytes(args) }
+		'uuid_v7' { return fn_uuid_v7(args) }
+		'get_hostname' { return fn_get_hostname() }
 		else { return error('unknown function: ${name}') }
 	}
 }
@@ -1878,6 +2223,7 @@ fn parse_json_recursive(s string) !VrlValue {
 }
 
 fn parse_json_array(s string) !VrlValue {
+	if s.len < 2 { return error('invalid JSON array') }
 	end := s.len - 1
 	inner := s[1..end].trim_space()
 	if inner.len == 0 { return VrlValue([]VrlValue{}) }
@@ -1891,6 +2237,7 @@ fn parse_json_array(s string) !VrlValue {
 }
 
 fn parse_json_object(s string) !VrlValue {
+	if s.len < 2 { return error('invalid JSON object') }
 	end := s.len - 1
 	inner := s[1..end].trim_space()
 	if inner.len == 0 { return VrlValue(new_object_map()) }
@@ -2488,8 +2835,37 @@ fn fn_from_unix_timestamp(args []VrlValue) !VrlValue {
 	a := args[0]
 	match a {
 		int {
-			t := time.unix(a)
-			return VrlValue(Timestamp{t: t})
+			unit := if args.len > 1 {
+				u := args[1]
+				match u { string { u } else { 'seconds' } }
+			} else { 'seconds' }
+			match unit {
+				'seconds' {
+					t := time.unix(a)
+					return VrlValue(Timestamp{t: t})
+				}
+				'milliseconds' {
+					secs := a / 1000
+					micro := (a % 1000) * 1000
+					t := time.unix_microsecond(secs, micro)
+					return VrlValue(Timestamp{t: t})
+				}
+				'microseconds' {
+					secs := a / 1_000_000
+					micro := a % 1_000_000
+					t := time.unix_microsecond(secs, micro)
+					return VrlValue(Timestamp{t: t})
+				}
+				'nanoseconds' {
+					secs := a / 1_000_000_000
+					micro := (a % 1_000_000_000) / 1000
+					t := time.unix_microsecond(secs, micro)
+					return VrlValue(Timestamp{t: t})
+				}
+				else {
+					return error('unknown unit: ${unit}')
+				}
+			}
 		}
 		else { return error('from_unix_timestamp requires an integer') }
 	}
@@ -2635,8 +3011,26 @@ fn fn_to_unix_timestamp(args []VrlValue) !VrlValue {
 				u := args[1]
 				match u { string { u } else { 'seconds' } }
 			} else { 'seconds' }
-			v := int(a.t.unix())
-			return VrlValue(v)
+			match unit {
+				'seconds' {
+					return VrlValue(int(a.t.unix()))
+				}
+				'milliseconds' {
+					ms := a.t.unix_micro() / 1000
+					return if ms > 0x7FFFFFFF || ms < -0x7FFFFFFF { VrlValue(f64(ms)) } else { VrlValue(int(ms)) }
+				}
+				'microseconds' {
+					us := a.t.unix_micro()
+					return if us > 0x7FFFFFFF || us < -0x7FFFFFFF { VrlValue(f64(us)) } else { VrlValue(int(us)) }
+				}
+				'nanoseconds' {
+					ns := a.t.unix_micro() * 1000
+					return if ns > 0x7FFFFFFF || ns < -0x7FFFFFFF { VrlValue(f64(ns)) } else { VrlValue(int(ns)) }
+				}
+				else {
+					return error('unknown unit: ${unit}')
+				}
+			}
 		}
 		else { return error('to_unix_timestamp requires a timestamp') }
 	}

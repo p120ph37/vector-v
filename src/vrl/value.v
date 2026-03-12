@@ -134,7 +134,7 @@ pub fn vrl_to_json(v VrlValue) string {
 		}
 		Timestamp {
 			ts := format_timestamp(v.t)
-			return "\"t'${ts}'\""
+			return '"${ts}"'
 		}
 		VrlRegex {
 			return "\"r'${v.pattern}'\""
@@ -172,7 +172,7 @@ pub fn vrl_to_json_pretty(v VrlValue, indent int) string {
 		VrlNull { return 'null' }
 		Timestamp {
 			ts := format_timestamp(v.t)
-			return "\"t'${ts}'\""
+			return '"${ts}"'
 		}
 		VrlRegex { return "\"r'${v.pattern}'\"" }
 		[]VrlValue {
