@@ -167,6 +167,6 @@ fn test_upstream_vrl_conformance() {
 	}
 	os.write_file('/tmp/vrl_conformance_results.txt', report.join('\n')) or {}
 	// Many remaining failures require static type analysis (type_def) which is
-	// not implemented in our runtime-based interpreter. Allow up to 35 failures.
-	assert failed <= 35, 'VRL conformance: ${failed} failures (max 35 allowed). See /tmp/vrl_conformance_results.txt'
+	// not implemented in our runtime-based interpreter. Allow up to 28 failures.
+	assert failed <= 28, 'VRL conformance: ${failed} failures (max 28 allowed). See /tmp/vrl_conformance_results.txt'
 }

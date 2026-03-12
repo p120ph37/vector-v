@@ -64,19 +64,32 @@ fn (mut p Parser) parse_assignment() !Expr {
 			} else if p.current().kind == .ident {
 				name := p.current().lit
 				p.advance()
-				// Check for dotted path like err.bar.baz
-				mut full_name := name
-				for p.current().kind == .dot && p.pos + 1 < p.tokens.len
-					&& p.tokens[p.pos + 1].kind == .ident {
-					p.advance() // skip .
-					full_name += '.' + p.current().lit
-					p.advance() // skip ident
-				}
-				if full_name.contains('.') {
-					err_target = Expr(PathExpr{path: '.' + full_name})
+				// Check for dotted path: err.bar.baz or err followed by .dot_ident
+				// Build as IndexExpr chain from IdentExpr root
+				mut target_expr := Expr(IdentExpr{name: name})
+				if p.current().kind == .dot_ident {
+					suffix := p.current().lit // e.g. ".bar.baz"
+					p.advance()
+					// Split suffix into parts and create IndexExpr chain
+					clean := if suffix.starts_with('.') { suffix[1..] } else { suffix }
+					for part in clean.split('.') {
+						target_expr = Expr(IndexExpr{
+							expr: [target_expr]
+							index: [Expr(LiteralExpr{value: VrlValue(part)})]
+						})
+					}
 				} else {
-					err_target = Expr(IdentExpr{name: name})
+					for p.current().kind == .dot && p.pos + 1 < p.tokens.len
+						&& p.tokens[p.pos + 1].kind == .ident {
+						p.advance() // skip .
+						target_expr = Expr(IndexExpr{
+							expr: [target_expr]
+							index: [Expr(LiteralExpr{value: VrlValue(p.current().lit)})]
+						})
+						p.advance() // skip ident
+					}
 				}
+				err_target = target_expr
 				got_target = true
 			}
 			if got_target && p.current().kind == .assign {
