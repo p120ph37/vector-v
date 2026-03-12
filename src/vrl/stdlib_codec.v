@@ -1,5 +1,8 @@
 module vrl
 
+import compress.gzip
+import compress.zlib
+import compress.zstd
 import encoding.base64
 import encoding.hex
 
@@ -568,4 +571,136 @@ fn decode_mime_q_encoding(s string) []u8 {
 		}
 	}
 	return result
+}
+
+// encode_zlib(value, [compression_level]) - Compress string using zlib, return compressed bytes as string
+fn fn_encode_zlib(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('encode_zlib requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('encode_zlib requires a string') }
+	}
+	compressed := zlib.compress(s.bytes()) or { return error('zlib compression failed: ${err}') }
+	return VrlValue(compressed.bytestr())
+}
+
+// decode_zlib(value) - Decompress zlib bytes (as string) into original string
+fn fn_decode_zlib(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('decode_zlib requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('decode_zlib requires a string') }
+	}
+	decompressed := zlib.decompress(s.bytes()) or {
+		return error('zlib decompression failed: ${err}')
+	}
+	return VrlValue(decompressed.bytestr())
+}
+
+// encode_gzip(value, [compression_level]) - Compress string using gzip, return compressed bytes as string
+fn fn_encode_gzip(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('encode_gzip requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('encode_gzip requires a string') }
+	}
+	level := if args.len > 1 { get_int_arg(args[1], 128) } else { 128 }
+	compressed := gzip.compress(s.bytes(), compression_level: level) or {
+		return error('gzip compression failed: ${err}')
+	}
+	return VrlValue(compressed.bytestr())
+}
+
+// decode_gzip(value) - Decompress gzip bytes (as string) into original string
+fn fn_decode_gzip(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('decode_gzip requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('decode_gzip requires a string') }
+	}
+	decompressed := gzip.decompress(s.bytes()) or {
+		return error('gzip decompression failed: ${err}')
+	}
+	return VrlValue(decompressed.bytestr())
+}
+
+// encode_zstd(value, [compression_level]) - Compress string using zstd, return compressed bytes as string
+fn fn_encode_zstd(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('encode_zstd requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('encode_zstd requires a string') }
+	}
+	level := if args.len > 1 { get_int_arg(args[1], 3) } else { 3 }
+	compressed := zstd.compress(s.bytes(), compression_level: level) or {
+		return error('zstd compression failed: ${err}')
+	}
+	return VrlValue(compressed.bytestr())
+}
+
+// decode_zstd(value) - Decompress zstd bytes (as string) into original string.
+// Uses streaming decompression as fallback for frames without content size.
+fn fn_decode_zstd(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('decode_zstd requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('decode_zstd requires a string') }
+	}
+	data := s.bytes()
+	if decompressed := zstd.decompress(data) {
+		return VrlValue(decompressed.bytestr())
+	}
+	return fn_decode_zstd_streaming(data)
+}
+
+fn fn_decode_zstd_streaming(data []u8) !VrlValue {
+	mut dctx := zstd.new_dctx() or {
+		return error('zstd decompression failed: failed to create context')
+	}
+	defer {
+		dctx.free_dctx()
+	}
+	buf_size := 1024 * 64
+	mut buf_out := []u8{len: buf_size}
+	mut result := []u8{}
+	mut input := &zstd.InBuffer{
+		src: data.data
+		size: usize(data.len)
+		pos: 0
+	}
+	mut output := &zstd.OutBuffer{
+		dst: buf_out.data
+		size: usize(buf_size)
+		pos: 0
+	}
+	for input.pos < input.size {
+		output.dst = buf_out.data
+		output.size = usize(buf_size)
+		output.pos = 0
+		dctx.decompress_stream(output, input) or {
+			return error('zstd decompression failed: ${err}')
+		}
+		if output.pos > 0 {
+			result << buf_out[..int(output.pos)]
+		}
+	}
+	return VrlValue(result.bytestr())
 }

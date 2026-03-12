@@ -92,6 +92,9 @@ fn type_from_value(v VrlValue) ObjectMap {
 
 // type_union merges two type ObjectMaps, combining all possible types.
 fn type_union(a ObjectMap, b ObjectMap) ObjectMap {
+	// If either side is "any", the union is "any"
+	if _ := a.get('any') { return a }
+	if _ := b.get('any') { return b }
 	mut result := a.clone_map()
 	for k in b.keys() {
 		bval := b.get(k) or { continue }
@@ -418,7 +421,8 @@ fn infer_expr_type(expr Expr, mut env TypeEnv) ObjectMap {
 			// ok target gets the value type, err target gets string
 			apply_assign_type(expr.ok_target[0], val_type, mut env)
 			apply_assign_type(expr.err_target[0], bytes_type(), mut env)
-			return val_type
+			// The expression can return either the success value or the error string
+			return type_union(val_type, bytes_type())
 		}
 		ClosureExpr {
 			return any_type()
@@ -741,16 +745,22 @@ fn infer_fn_call_type(expr FnCallExpr, mut env TypeEnv) ObjectMap {
 		'map_values', 'map_keys', 'keys', 'values', 'split',
 		'chunks', 'split_path', 'parse_csv', 'parse_tokens',
 		'parse_regex_all', 'unnest', 'zip', 'object_from_array' {
-			// For push on unknown array, return special type
-			if name == 'push' && expr.args.len > 0 {
+			// For push, infer element types from the pushed value
+			if name == 'push' && expr.args.len >= 2 {
 				arg_type := infer_expr_type(expr.args[0], mut env)
-				// If first arg is any_type (unknown path), return unknown array type
 				if _ := arg_type.get('any') {
 					mut m := new_object_map()
 					m.set('array', VrlValue(new_object_map()))
 					m.set('array_unknown_infinite', VrlValue(any_type()))
 					return m
 				}
+				// Infer element type from the second arg (the pushed value)
+				elem_type := infer_expr_type(expr.args[1], mut env)
+				mut inner := new_object_map()
+				inner.set('0', VrlValue(elem_type))
+				mut m := new_object_map()
+				m.set('array', VrlValue(inner))
+				return m
 			}
 			mut m := new_object_map()
 			m.set('array', VrlValue(new_object_map()))
@@ -891,25 +901,35 @@ fn (mut rt Runtime) update_type_vars_for_if_saved(expr IfExpr, saved_vars map[st
 		all_paths[k] = true
 	}
 
+	// Check if root '.' was explicitly assigned (determines if untracked fields default to any or undefined)
+	root_was_set := '.' in saved_paths
+
 	for p, _ in all_paths {
 		// Check if this path was newly assigned in only one branch
 		in_then := then_env.paths[p] or { new_object_map() }
 		in_else := else_env.paths[p] or { new_object_map() }
 		had_before := p in saved_paths
 
+		// For paths not tracked before the if:
+		// - If root was explicitly set (e.g., . = {}), field defaults to undefined
+		// - If root was not set (external event), field defaults to any
+		fallback_type := if had_before {
+			saved_paths[p] or { undefined_type() }
+		} else if root_was_set {
+			undefined_type()
+		} else {
+			any_type()
+		}
+
 		then_t := if in_then.len() > 0 {
 			in_then
-		} else if had_before {
-			saved_paths[p] or { new_object_map() }
 		} else {
-			undefined_type()
+			fallback_type
 		}
 		else_t := if in_else.len() > 0 {
 			in_else
-		} else if had_before {
-			saved_paths[p] or { new_object_map() }
 		} else {
-			undefined_type()
+			fallback_type
 		}
 		rt.type_paths[p] = type_union(then_t, else_t)
 	}

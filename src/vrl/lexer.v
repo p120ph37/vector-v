@@ -423,6 +423,10 @@ fn (mut l Lexer) read_dot_path(line int, col int) Token {
 				|| l.src[l.pos + 1] == `"` || l.src[l.pos + 1] == `@`
 				|| (l.src[l.pos + 1].is_digit() && l.is_digit_leading_ident(l.pos + 1))) {
 				l.advance() // skip .
+			} else if l.pos > start + 1 {
+				// Trailing dot after a path segment (e.g., .foo.) is a syntax error
+				l.errors << 'syntax error: unexpected end of query path'
+				break
 			} else {
 				break
 			}

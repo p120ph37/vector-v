@@ -488,6 +488,12 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'encode_key_value' { return fn_encode_key_value(args) }
 		'encode_logfmt' { return fn_encode_logfmt(args) }
 		'decode_mime_q' { return fn_decode_mime_q(args) }
+		'encode_zlib' { return fn_encode_zlib(args) }
+		'decode_zlib' { return fn_decode_zlib(args) }
+		'encode_gzip' { return fn_encode_gzip(args) }
+		'decode_gzip' { return fn_decode_gzip(args) }
+		'encode_zstd' { return fn_encode_zstd(args) }
+		'decode_zstd' { return fn_decode_zstd(args) }
 		// Crypto
 		'sha1' { return fn_sha1(args) }
 		'sha2' { return fn_sha2(args) }
@@ -519,6 +525,7 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'parse_query_string' { return fn_parse_query_string(args) }
 		'parse_tokens' { return fn_parse_tokens(args) }
 		'parse_common_log' { return fn_parse_common_log(args) }
+		'parse_yaml' { return fn_parse_yaml(args) }
 		'parse_syslog' { return fn_parse_syslog(args) }
 		'parse_duration' { return fn_parse_duration(args) }
 		'parse_bytes' { return fn_parse_bytes(args) }
@@ -583,6 +590,103 @@ fn fn_compact_named(v VrlValue, named map[string]VrlValue) !VrlValue {
 	return compact_value(v, null_flag, string_flag, object_flag, array_flag, nullish_flag, recursive)
 }
 
+// fn_max_args returns the max number of positional args a function accepts, or -1 if unknown.
+fn fn_max_args(name string) int {
+	return match name {
+		// Strict 1-arg functions (no optional parameters)
+		'to_string', 'to_int', 'int', 'to_float', 'float', 'to_bool', 'bool',
+		'string', 'length', 'strlen', 'strip_whitespace', 'trim', 'downcase', 'upcase',
+		'is_string', 'is_integer', 'is_float', 'is_boolean', 'is_null', 'is_array', 'is_object',
+		'is_nullish', 'is_empty', 'is_json', 'is_regex', 'is_timestamp', 'is_ipv4', 'is_ipv6',
+		'keys', 'values',
+		'abs', 'array', 'object', 'timestamp',
+		'decode_mime_q', 'sha1', 'md5',
+		'tag_types_externally', 'tally',
+		'ip_version', 'type_def', 'pop',
+		'decode_zlib', 'decode_gzip', 'decode_zstd' { 1 }
+		else { -1 }
+	}
+}
+
+// fn_valid_keywords returns the valid named argument keywords for a function.
+fn fn_valid_keywords(name string) []string {
+	return match name {
+		'to_string' { ['value'] }
+		'to_int' { ['value'] }
+		'to_float' { ['value'] }
+		'to_bool' { ['value'] }
+		'downcase', 'upcase' { ['value'] }
+		'contains' { ['value', 'substring', 'case_sensitive'] }
+		'starts_with' { ['value', 'substring', 'case_sensitive'] }
+		'ends_with' { ['value', 'substring', 'case_sensitive'] }
+		'split' { ['value', 'pattern', 'limit'] }
+		'join' { ['value', 'separator'] }
+		'replace' { ['value', 'pattern', 'with', 'count'] }
+		'truncate' { ['value', 'limit', 'ellipsis', 'suffix'] }
+		'slice' { ['value', 'start', 'end'] }
+		'match' { ['value', 'pattern'] }
+		'match_any' { ['value', 'patterns'] }
+		'parse_regex' { ['value', 'pattern', 'numeric_groups'] }
+		'parse_regex_all' { ['value', 'pattern', 'numeric_groups'] }
+		'parse_key_value' { ['value', 'key_value_delimiter', 'field_delimiter', 'whitespace', 'accept_standalone_key'] }
+		'format_timestamp' { ['value', 'format', 'timezone'] }
+		'parse_timestamp' { ['value', 'format', 'timezone'] }
+		'to_unix_timestamp' { ['value', 'unit'] }
+		'from_unix_timestamp' { ['value', 'unit'] }
+		'encode_base64' { ['value', 'padding', 'charset'] }
+		'sha2' { ['value', 'variant'] }
+		'hmac' { ['value', 'key', 'algorithm'] }
+		'round' { ['value', 'precision'] }
+		'format_number' { ['value', 'decimal_separator', 'grouping_separator', 'fractional_digits'] }
+		'compact' { ['value', 'null', 'string', 'object', 'array', 'nullish', 'recursive'] }
+		'merge' { ['value', 'other', 'deep'] }
+		'find' { ['value', 'pattern', 'from'] }
+		'set' { ['value', 'path', 'data'] }
+		'get' { ['value', 'path'] }
+		'remove' { ['value', 'path', 'compact'] }
+		'chunks' { ['value', 'chunk_size'] }
+		'parse_csv' { ['value', 'delimiter'] }
+		'encode_csv' { ['value', 'delimiter'] }
+		'encode_key_value' { ['value', 'fields_ordering', 'key_value_delimiter', 'field_delimiter'] }
+		'ip_subnet' { ['value', 'subnet'] }
+		'uuid_v7' { ['timestamp'] }
+		'random_bytes' { ['length'] }
+		'parse_duration' { ['value', 'unit'] }
+		'sieve' { ['value', 'pattern', 'replace_single', 'replace_repeated', 'permitted_characters'] }
+		'assert' { ['condition', 'message'] }
+		'assert_eq' { ['left', 'right', 'message'] }
+		'log' { ['value', 'level', 'rate_limit_secs'] }
+		else { []string{} }
+	}
+}
+
+// validate_fn_args checks if a function call has too many arguments.
+fn validate_fn_args(name string, expr FnCallExpr) ! {
+	max := fn_max_args(name)
+	if max < 0 { return }
+	// Count positional args (excluding named args)
+	mut positional := 0
+	for i in 0 .. expr.args.len {
+		if i >= expr.arg_names.len || expr.arg_names[i].len == 0 {
+			positional++
+		}
+	}
+	if expr.args.len > max {
+		return error('too many function arguments: ${name} takes a maximum of ${max} argument${if max != 1 { 's' } else { '' }}')
+	}
+}
+
+// validate_fn_keywords checks if named argument keywords are valid for the function.
+fn validate_fn_keywords(name string, expr FnCallExpr) ! {
+	valid := fn_valid_keywords(name)
+	if valid.len == 0 { return }
+	for i, arg_name in expr.arg_names {
+		if arg_name.len > 0 && arg_name !in valid {
+			return error('unknown keyword argument "${arg_name}" for function "${name}"')
+		}
+	}
+}
+
 // eval_fn_call dispatches built-in VRL functions.
 fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 	// Strip trailing '!' more efficiently using byte check
@@ -590,6 +694,12 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 	if name.len > 0 && name[name.len - 1] == `!` {
 		name = name[..name.len - 1]
 	}
+
+	// Validate function argument count
+	validate_fn_args(name, expr)!
+
+	// Validate named argument keywords
+	validate_fn_keywords(name, expr)!
 
 	// Special functions that need unevaluated args (PathExpr)
 	if name == 'del' { return rt.fn_del(expr) }
@@ -678,6 +788,12 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'encode_logfmt' { return fn_encode_logfmt([a0]) }
 			'encode_csv' { return fn_encode_csv([a0]) }
 			'decode_mime_q' { return fn_decode_mime_q([a0]) }
+			'encode_zlib' { return fn_encode_zlib([a0]) }
+			'decode_zlib' { return fn_decode_zlib([a0]) }
+			'encode_gzip' { return fn_encode_gzip([a0]) }
+			'decode_gzip' { return fn_decode_gzip([a0]) }
+			'encode_zstd' { return fn_encode_zstd([a0]) }
+			'decode_zstd' { return fn_decode_zstd([a0]) }
 			'sha1' { return fn_sha1([a0]) }
 			'md5' { return fn_md5([a0]) }
 			'crc32' { return fn_crc32([a0]) }
@@ -687,6 +803,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'tally_value' { return fn_tally_value([a0]) }
 			'parse_tokens' { return fn_parse_tokens([a0]) }
 			'parse_common_log' { return fn_parse_common_log([a0]) }
+			'parse_yaml' { return fn_parse_yaml([a0]) }
 			'parse_syslog' { return fn_parse_syslog([a0]) }
 			'parse_logfmt' { return fn_parse_logfmt([a0]) }
 			'parse_klog' { return fn_parse_klog([a0]) }
@@ -721,6 +838,9 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'mod' { return fn_mod([a0, a1]) }
 			'slice' { return fn_slice([a0, a1]) }
 			'truncate' { return fn_truncate([a0, a1]) }
+			'encode_zlib' { return fn_encode_zlib([a0, a1]) }
+			'encode_gzip' { return fn_encode_gzip([a0, a1]) }
+			'encode_zstd' { return fn_encode_zstd([a0, a1]) }
 			else {}
 		}
 	}
@@ -807,6 +927,12 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		'encode_key_value' { return fn_encode_key_value(args) }
 		'encode_logfmt' { return fn_encode_logfmt(args) }
 		'decode_mime_q' { return fn_decode_mime_q(args) }
+		'encode_zlib' { return fn_encode_zlib(args) }
+		'decode_zlib' { return fn_decode_zlib(args) }
+		'encode_gzip' { return fn_encode_gzip(args) }
+		'decode_gzip' { return fn_decode_gzip(args) }
+		'encode_zstd' { return fn_encode_zstd(args) }
+		'decode_zstd' { return fn_decode_zstd(args) }
 		// Crypto
 		'sha1' { return fn_sha1(args) }
 		'sha2' { return fn_sha2(args) }
@@ -838,6 +964,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		'parse_query_string' { return fn_parse_query_string(args) }
 		'parse_tokens' { return fn_parse_tokens(args) }
 		'parse_common_log' { return fn_parse_common_log(args) }
+		'parse_yaml' { return fn_parse_yaml(args) }
 		'parse_syslog' { return fn_parse_syslog(args) }
 		'parse_duration' { return fn_parse_duration(args) }
 		'parse_bytes' { return fn_parse_bytes(args) }
@@ -1402,12 +1529,23 @@ fn (mut rt Runtime) resolve_type_def(arg Expr) ObjectMap {
 			mut result_type := runtime_type
 			if tracked := rt.type_paths[key] {
 				result_type = type_union(result_type, tracked)
+			} else if arg.path != '.' {
+				// External path never assigned in this program — type is "any"
+				// because the event could contain any type for this field
+				mut any_type := new_object_map()
+				any_type.set('any', VrlValue(true))
+				return any_type
 			}
 			// For root object '.', also overlay individual path types
 			if arg.path == '.' {
 				result_type = rt.overlay_path_types(result_type)
 			}
 			return result_type
+		}
+		MetaPathExpr {
+			// Get runtime metadata value and derive type from it
+			val := rt.get_meta(arg.path) or { VrlValue(VrlNull{}) }
+			return type_from_value(val)
 		}
 		IndexExpr {
 			// For indexing (x[1]), use static inference
@@ -1419,8 +1557,19 @@ fn (mut rt Runtime) resolve_type_def(arg Expr) ObjectMap {
 			}
 			return result
 		}
+		BlockExpr {
+			// Evaluate the block at runtime and use the actual result type
+			val := rt.eval(arg) or { return rt.infer_type(arg) }
+			runtime_type := type_from_value(val)
+			// Union with static inference to capture error/alternative paths
+			static_type := rt.infer_type(arg)
+			if static_type.len() > 0 {
+				return type_union(runtime_type, static_type)
+			}
+			return runtime_type
+		}
 		else {
-			// For blocks, function calls, etc. use static inference
+			// For function calls, etc. use static inference
 			return rt.infer_type(arg)
 		}
 	}
@@ -1433,8 +1582,23 @@ fn (mut rt Runtime) fn_del(expr FnCallExpr) !VrlValue {
 	match path_expr {
 		PathExpr {
 			if path_expr.path == '.' {
-				old := VrlValue(rt.object.clone_map())
+				mut old := VrlValue(VrlNull{})
+				if rt.has_root_scalar {
+					old = rt.root_scalar
+				} else if rt.has_root_array {
+					old = VrlValue(rt.root_array.clone())
+				} else {
+					old = VrlValue(rt.object.clone_map())
+				}
+				// After del(.), root is null
 				rt.object.clear()
+				rt.has_root_array = false
+				rt.root_scalar = VrlValue(VrlNull{})
+				rt.has_root_scalar = true
+				// Update type tracking: after del(.), type is null
+				mut null_type := new_object_map()
+				null_type.set('null', VrlValue(true))
+				rt.type_paths['.'] = null_type
 				return old
 			}
 			clean := if path_expr.path.starts_with('.') { path_expr.path[1..] } else { path_expr.path }
@@ -1444,6 +1608,16 @@ fn (mut rt Runtime) fn_del(expr FnCallExpr) !VrlValue {
 				return val
 			}
 			return rt.del_nested_path(parts)
+		}
+		MetaPathExpr {
+			if path_expr.path == '%' {
+				old := VrlValue(rt.metadata.clone_map())
+				rt.metadata.clear()
+				return old
+			}
+			clean := if path_expr.path.starts_with('%') { path_expr.path[1..] } else { path_expr.path }
+			val := rt.metadata.delete(clean)
+			return val
 		}
 		IndexExpr {
 			return rt.del_index_expr(path_expr)
@@ -2526,7 +2700,7 @@ fn fn_ensure_array(args []VrlValue) !VrlValue {
 	a := args[0]
 	match a {
 		[]VrlValue { return VrlValue(a) }
-		else { return VrlValue([]VrlValue{}) }
+		else { return error('expected array, got ${vrl_type_name(a)}') }
 	}
 }
 
