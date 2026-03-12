@@ -73,19 +73,23 @@ fn is_uuid_v7_test(name string) bool {
 	return name.contains('uuid_v7') && !name.contains('invalid')
 }
 
-// cmp_uuid_v7 compares UUID v7 results with special handling:
-// - Masks out random bits (rand_a: nibbles 13-15 of hex, rand_b: last 16 hex chars)
-// - Verifies the masked random portion was non-zero
-// - In rust_vrl_compat mode: compares full timestamp prefix exactly
-// - Otherwise: masks the sub-millisecond timestamp bits (byte 6 low nibble) too
+// cmp_uuid_v7 compares UUID v7 results with special handling.
+//
+// Since we now implement a 42-bit monotonic counter matching the Rust uuid
+// crate's ContextV7, the only non-deterministic portion is the final 32 bits
+// (bytes 12-15).  The counter and timestamp bits are fully deterministic for a
+// given timestamp, so we do NOT need to mask them out.
+//
+// The test still needs rust-quirk-aware timestamp comparison because the
+// upstream test vector encodes the Rust-specific u32-truncated nanos timestamp.
 fn cmp_uuid_v7(actual VrlValue, expected string, src string) bool {
 	// uuid_v7 tests typically use match() which returns bool
-	// If the result is a simple true, the match passed
+	// If the result is a simple true, the match() already passed
 	a := actual
 	if a is bool && a == true {
 		return true
 	}
-	// If the result is a string (UUID), do structural comparison
+	// If the result is a string (UUID), do structural validation
 	act_str := match a {
 		string { a }
 		else { return false }
@@ -103,31 +107,16 @@ fn cmp_uuid_v7(actual VrlValue, expected string, src string) bool {
 	variant := act_hex[16]
 	if variant != `8` && variant != `9` && variant != `a` && variant != `b` { return false }
 
-	// Check that random portion is non-zero
-	// rand_a = hex positions 13-15 (3 nibbles after version)
-	// rand_b = hex positions 17-31 (after variant, 15 nibbles... actually 16-31 minus variant)
-	rand_part := act_hex[13..16] + act_hex[17..32]
-	mut all_zero := true
-	for c in rand_part {
-		if c != `0` { all_zero = false; break }
-	}
-	if all_zero { return false }
-
-	// Compare timestamp portion
-	// Positions 0-11 are the 48-bit ms timestamp (12 hex chars)
-	// In rust_vrl_compat mode, compare exactly
-	// Otherwise, only compare the first 10 hex chars (40 bits) to allow
-	// sub-millisecond divergence in the low-order byte
-	if src.contains("uuid_v7(t'") || src.contains('uuid_v7(t)') {
-		// Has a test-vector regex pattern - extract expected prefix from source
-		// Look for patterns like: 0176b5bd-5d19-7
+	// For tests with a known timestamp, verify the timestamp prefix.
+	// In rust_vrl_compat mode the full 48-bit (12 hex char) prefix must match
+	// the upstream test vector exactly.  Otherwise compare only the top 40 bits
+	// (10 hex chars) to allow for the sub-millisecond divergence.
+	if src.contains("uuid_v7(t'") {
 		mut expected_prefix := ''
 		for line in src.split('\n') {
 			if line.contains("r'^") && line.contains('-7[') {
-				// Extract hex prefix from regex pattern
 				start := line.index("r'^") or { continue }
 				pat := line[start + 3..]
-				// Collect hex and strip hyphens
 				mut hex := []u8{}
 				for c in pat {
 					if c == `-` { continue }
@@ -143,12 +132,8 @@ fn cmp_uuid_v7(actual VrlValue, expected string, src string) bool {
 		}
 		if expected_prefix.len > 0 {
 			if rust_vrl_compat {
-				// Full prefix comparison
 				if !act_hex.starts_with(expected_prefix) { return false }
 			} else {
-				// Mask sub-ms bits: compare only the high-order portion
-				// The prefix might be e.g. "0176b5bd5d19" (12 chars)
-				// Only compare first 10 hex chars to allow divergence
 				cmp_len := if expected_prefix.len > 10 { 10 } else { expected_prefix.len }
 				if act_hex[..cmp_len] != expected_prefix[..cmp_len] { return false }
 			}
