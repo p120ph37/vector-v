@@ -694,10 +694,21 @@ fn infer_fn_call_type(expr FnCallExpr, mut env TypeEnv) ObjectMap {
 	// Functions with known return types
 	match name {
 		'downcase', 'upcase', 'to_string', 'string', 'strip_whitespace',
-		'truncate', 'trim', 'replace', 'join', 'encode_json', 'uuid_v4', 'now' {
+		'truncate', 'trim', 'replace', 'join', 'encode_json', 'uuid_v4',
+		'encode_base64', 'decode_base64', 'encode_base16', 'decode_base16',
+		'encode_percent', 'decode_percent', 'encode_csv', 'encode_key_value',
+		'encode_logfmt', 'sha1', 'sha2', 'sha3', 'md5', 'hmac',
+		'camelcase', 'pascalcase', 'snakecase', 'kebabcase', 'screamingsnakecase',
+		'basename', 'dirname', 'strip_ansi_escape_codes', 'sieve',
+		'replace_with', 'format_int', 'format_timestamp', 'ip_ntoa',
+		'ip_to_ipv6', 'ipv6_to_ipv4', 'ip_subnet', 'ip_version',
+		'to_syslog_level', 'to_syslog_facility', 'get_hostname',
+		'uuid_v7' {
 			return bytes_type()
 		}
-		'contains', 'starts_with', 'ends_with' {
+		'contains', 'starts_with', 'ends_with', 'is_empty', 'is_json',
+		'is_regex', 'is_timestamp', 'is_ipv4', 'is_ipv6', 'ip_cidr_contains',
+		'random_bool', 'match_array' {
 			return boolean_type()
 		}
 		'slice' {
@@ -707,10 +718,13 @@ fn infer_fn_call_type(expr FnCallExpr, mut env TypeEnv) ObjectMap {
 			}
 			return any_type()
 		}
-		'to_int', 'int', 'strlen', 'length', 'to_unix_timestamp' {
+		'to_int', 'int', 'strlen', 'length', 'to_unix_timestamp',
+		'ip_aton', 'parse_int', 'to_syslog_severity', 'to_syslog_facility_code',
+		'random_int', 'parse_bytes' {
 			return integer_type()
 		}
-		'to_float', 'float' {
+		'to_float', 'float', 'parse_float', 'random_float',
+		'shannon_entropy', 'parse_duration' {
 			return float_type()
 		}
 		'to_bool', 'bool', 'is_string', 'is_integer', 'is_float',
@@ -718,8 +732,15 @@ fn infer_fn_call_type(expr FnCallExpr, mut env TypeEnv) ObjectMap {
 		'is_nullish', 'match', 'assert', 'assert_eq' {
 			return boolean_type()
 		}
+		'parse_timestamp', 'timestamp', 'now' {
+			mut m := new_object_map()
+			m.set('timestamp', VrlValue(true))
+			return m
+		}
 		'push', 'append', 'flatten', 'compact', 'unique', 'filter',
-		'map_values', 'map_keys', 'keys', 'values', 'split' {
+		'map_values', 'map_keys', 'keys', 'values', 'split',
+		'chunks', 'split_path', 'parse_csv', 'parse_tokens',
+		'parse_regex_all', 'unnest', 'zip', 'object_from_array' {
 			// For push on unknown array, return special type
 			if name == 'push' && expr.args.len > 0 {
 				arg_type := infer_expr_type(expr.args[0], mut env)
@@ -735,7 +756,9 @@ fn infer_fn_call_type(expr FnCallExpr, mut env TypeEnv) ObjectMap {
 			m.set('array', VrlValue(new_object_map()))
 			return m
 		}
-		'merge' {
+		'merge', 'parse_regex', 'parse_key_value', 'parse_url',
+		'parse_query_string', 'tally', 'tally_value',
+		'tag_types_externally', 'remove' {
 			mut m := new_object_map()
 			m.set('object', VrlValue(new_object_map()))
 			return m
