@@ -191,8 +191,8 @@ fn test_upstream_vrl_conformance() {
 			continue
 		}
 
-		// Skip extremely large tests (>100 lines of source)
-		if src.count('\n') > 100 { skipped++; continue }
+		// Skip extremely large tests (>200 lines of source)
+		if src.count('\n') > 200 { skipped++; continue }
 
 		mut obj := map[string]VrlValue{}
 		if oj.len > 0 {
@@ -254,5 +254,5 @@ fn test_upstream_vrl_conformance() {
 	os.write_file('/tmp/vrl_conformance_results.txt', report.join('\n')) or {}
 	// Remaining failures: type_def edge cases (3), query/parsing issues (5),
 	// error messages (2), new stdlib edge cases (4). Allow up to 14 failures.
-	assert failed <= 14, 'VRL conformance: ${failed} failures (max 14 allowed). See /tmp/vrl_conformance_results.txt'
+	assert failed <= 7, 'VRL conformance: ${failed} failures (max 7 allowed). See /tmp/vrl_conformance_results.txt'
 }

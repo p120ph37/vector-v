@@ -72,6 +72,9 @@ pub fn (rt &Runtime) get_object() map[string]VrlValue {
 pub fn execute(source string, obj map[string]VrlValue) !VrlValue {
 	mut lex := new_lexer(source)
 	tokens := lex.tokenize()
+	if lex.errors.len > 0 {
+		return error(lex.errors[0])
+	}
 	mut parser := new_parser(tokens)
 	ast := parser.parse()!
 	mut rt := new_runtime_with_object(obj)
@@ -187,8 +190,16 @@ fn (mut rt Runtime) eval_ok_err_assign(expr OkErrAssignExpr) !VrlValue {
 		rt.assign_to(expr.err_target[0], VrlValue(err_msg))
 		return VrlValue(err_msg)
 	}
-	// Success: assign value to ok, null to err
-	rt.assign_to(expr.ok_target[0], val)
+	if expr.is_merge {
+		// Merge assignment: merge val into existing target
+		rt.merge_assign(expr.ok_target[0], val) or {
+			// If merge fails (e.g. non-object), fall back to direct assign
+			rt.assign_to(expr.ok_target[0], val)
+		}
+	} else {
+		// Success: assign value to ok, null to err
+		rt.assign_to(expr.ok_target[0], val)
+	}
 	rt.assign_to(expr.err_target[0], VrlValue(VrlNull{}))
 	return val
 }
@@ -1046,7 +1057,9 @@ fn arith_mul(left VrlValue, right VrlValue) !VrlValue {
 		for _ in 0 .. n { result += s }
 		return VrlValue(result)
 	}
-	return error("can't multiply these types")
+	lt := vrl_type_name(left)
+	rt_ := vrl_type_name(right)
+	return error("can't multiply type ${lt} by ${rt_}")
 }
 
 fn arith_div(left VrlValue, right VrlValue) !VrlValue {
@@ -1076,7 +1089,9 @@ fn arith_div(left VrlValue, right VrlValue) !VrlValue {
 			return VrlValue((left as f64) / r)
 		}
 	}
-	return error("can't divide these types")
+	lt := vrl_type_name(left)
+	rt_ := vrl_type_name(right)
+	return error("can't divide type ${lt} by ${rt_}")
 }
 
 fn arith_mod(left VrlValue, right VrlValue) !VrlValue {

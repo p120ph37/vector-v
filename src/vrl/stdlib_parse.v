@@ -1,5 +1,7 @@
 module vrl
 
+import os
+import math
 import regex.pcre
 import time
 
@@ -780,10 +782,178 @@ fn fn_parse_timestamp(args []VrlValue) !VrlValue {
 		}
 		return VrlValue(Timestamp{t: t})
 	}
+	// Check if format contains %z (timezone offset) — V's parse_format doesn't support it,
+	// so we strip the timezone from the input and format, parse the rest, then apply the offset.
+	if fmt.contains('%z') {
+		return parse_timestamp_with_tz(s, fmt)
+	}
+	// Expand shortcuts like %T -> %H:%M:%S and handle %b (month names)
+	expanded := expand_strftime_shortcuts(fmt)
+	processed_s2, processed_fmt2 := replace_month_name_in_input(s, expanded) or {
+		return error('unable to parse timestamp: ${s}')
+	}
 	// Convert strftime format to V time format
-	v_fmt := strftime_to_v_format(fmt)
-	t := time.parse_format(s, v_fmt) or { return error('unable to parse timestamp: ${s}') }
+	v_fmt := strftime_to_v_format(processed_fmt2)
+	t := time.parse_format(processed_s2, v_fmt) or {
+		return error('unable to parse timestamp: ${s}')
+	}
 	return VrlValue(Timestamp{t: t})
+}
+
+// parse_timestamp_with_tz handles formats containing %z by stripping the timezone offset
+// from the input string, parsing the datetime portion, and then applying the offset.
+fn parse_timestamp_with_tz(s string, fmt string) !VrlValue {
+	// First expand shortcuts like %T -> %H:%M:%S
+	expanded_fmt := expand_strftime_shortcuts(fmt)
+	// Replace month names (%b) with numeric months in both input and format
+	processed_s, processed_fmt := replace_month_name_in_input(s, expanded_fmt)!
+	// Find where %z appears in the format to locate the timezone in the input string.
+	// Build the format without %z and figure out what separates the tz from the rest.
+	fmt_no_tz := processed_fmt.replace('%z', '').trim_right(' ')
+	v_fmt := strftime_to_v_format(fmt_no_tz)
+
+	// Find the timezone offset in the input string: look for +HHMM, -HHMM, +HH:MM, -HH:MM, or Z at the end
+	mut tz_offset_seconds := 0
+	mut datetime_str := processed_s
+	trimmed := processed_s.trim_space()
+	if trimmed.len >= 5 {
+		// Try to find a timezone offset pattern at the end: +0600, -0530, +06:00, etc.
+		mut tz_start := -1
+		for idx := trimmed.len - 1; idx >= 0; idx-- {
+			ch := trimmed[idx]
+			if ch == `+` || ch == `-` {
+				rest := trimmed[idx..]
+				// Validate it looks like a tz offset: +HHMM or +HH:MM
+				stripped := rest.replace(':', '')
+				if stripped.len >= 5 && stripped[1..].bytes().all(it.is_digit()) {
+					tz_start = idx
+				}
+				break
+			}
+			// Only digits and colons are valid in the tz portion
+			if !ch.is_digit() && ch != `:` {
+				break
+			}
+		}
+		if tz_start >= 0 {
+			tz_part := trimmed[tz_start..].trim_space()
+			tz_offset_seconds = parse_tz_offset(tz_part) or { 0 }
+			datetime_str = trimmed[..tz_start].trim_space()
+		}
+	}
+
+	t := time.parse_format(datetime_str, v_fmt) or {
+		return error('unable to parse timestamp: ${s}')
+	}
+	// Subtract the offset to convert local time to UTC
+	utc_t := t.add(-tz_offset_seconds * time.second)
+	return VrlValue(Timestamp{t: utc_t})
+}
+
+// expand_strftime_shortcuts expands strftime shortcut specifiers like %T -> %H:%M:%S
+// before further processing. This must be called before strftime_to_v_format.
+fn expand_strftime_shortcuts(fmt string) string {
+	mut result := []u8{}
+	mut i := 0
+	for i < fmt.len {
+		if fmt[i] == `%` && i + 1 < fmt.len {
+			i++
+			match fmt[i] {
+				`T` {
+					// %T is equivalent to %H:%M:%S
+					for c in '%H:%M:%S' {
+						result << c
+					}
+				}
+				`R` {
+					// %R is equivalent to %H:%M
+					for c in '%H:%M' {
+						result << c
+					}
+				}
+				else {
+					result << `%`
+					result << fmt[i]
+				}
+			}
+		} else {
+			result << fmt[i]
+		}
+		i++
+	}
+	return result.bytestr()
+}
+
+// month_abbrev_to_number converts an abbreviated month name (e.g. "Nov") to its
+// two-digit number string (e.g. "11"). Returns error if not recognized.
+fn month_abbrev_to_number(abbrev string) !string {
+	months := {
+		'jan': '01'
+		'feb': '02'
+		'mar': '03'
+		'apr': '04'
+		'may': '05'
+		'jun': '06'
+		'jul': '07'
+		'aug': '08'
+		'sep': '09'
+		'oct': '10'
+		'nov': '11'
+		'dec': '12'
+	}
+	return months[abbrev.to_lower()] or { error('unknown month abbreviation: ${abbrev}') }
+}
+
+// replace_month_name_in_input replaces abbreviated month names with numeric months
+// in the input string when the format contains %b. Returns the modified input string
+// and format string with %b replaced by %m.
+fn replace_month_name_in_input(s string, fmt string) !(string, string) {
+	if !fmt.contains('%b') {
+		return s, fmt
+	}
+	// Find where %b appears in the format string and use that position info
+	// to locate the month name in the input string.
+	// Strategy: split the format at %b, match the prefix length to find the month name position.
+	b_idx := fmt.index('%b') or { return s, fmt }
+	// The part of the format before %b tells us how many characters precede the month name.
+	prefix_fmt := fmt[..b_idx]
+	// Count the expected length of the prefix by expanding strftime specifiers
+	prefix_len := expanded_format_length(prefix_fmt, s)
+	if prefix_len < 0 || prefix_len + 3 > s.len {
+		return error('unable to locate month name in: ${s}')
+	}
+	month_str := s[prefix_len..prefix_len + 3]
+	month_num := month_abbrev_to_number(month_str)!
+	// Replace in input: swap the 3-letter month with 2-digit number
+	new_s := s[..prefix_len] + month_num + s[prefix_len + 3..]
+	new_fmt := fmt[..b_idx] + '%m' + fmt[b_idx + 2..]
+	return new_s, new_fmt
+}
+
+// expanded_format_length calculates how many characters the format prefix consumes
+// in the input string. This is a heuristic: literal chars map 1:1, format specifiers
+// map to their expected widths.
+fn expanded_format_length(prefix_fmt string, input string) int {
+	mut len := 0
+	mut i := 0
+	for i < prefix_fmt.len {
+		if prefix_fmt[i] == `%` && i + 1 < prefix_fmt.len {
+			i++
+			match prefix_fmt[i] {
+				`Y` { len += 4 }
+				`m`, `d`, `H`, `M`, `S` { len += 2 }
+				`e` { len += 2 } // day with space padding
+				`b` { len += 3 } // abbreviated month name
+				`T` { len += 8 } // HH:MM:SS
+				`R` { len += 5 } // HH:MM
+				else { len += 2 } // default guess for unknown specifiers
+			}
+		} else {
+			len += 1
+		}
+		i++
+	}
+	return len
 }
 
 fn strftime_to_v_format(fmt string) string {
@@ -835,6 +1005,12 @@ fn strftime_to_v_format(fmt string) string {
 				}
 				`+` {
 					for c in 'YYYY-MM-DDTHH:mm:ssZ' {
+						result << c
+					}
+				}
+				`T` {
+					// %T = %H:%M:%S
+					for c in 'HH:mm:ss' {
 						result << c
 					}
 				}
@@ -1124,4 +1300,852 @@ fn format_offset_colon(offset_seconds int) string {
 	hours := abs_off / 3600
 	minutes := (abs_off % 3600) / 60
 	return '${sign}${hours:02d}:${minutes:02d}'
+}
+
+// parse_common_log(value) - parses a Common Log Format string into an object
+// Format: host ident user [timestamp] "request" status size
+fn fn_parse_common_log(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('parse_common_log requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('parse_common_log requires a string') }
+	}
+	// Parse: host ident user [timestamp] "request" status size
+	mut i := 0
+	bytes := s.bytes()
+
+	// Helper: skip to next space, return token
+	host := clf_read_token(bytes, mut &i)
+	identity := clf_read_token(bytes, mut &i)
+	user := clf_read_token(bytes, mut &i)
+
+	// Read timestamp: [DD/Mon/YYYY:HH:MM:SS ±HHMM]
+	clf_skip_spaces(bytes, mut &i)
+	if i >= bytes.len || bytes[i] != `[` {
+		return error('parse_common_log: expected [ for timestamp')
+	}
+	i++ // skip [
+	mut ts_end := i
+	for ts_end < bytes.len && bytes[ts_end] != `]` {
+		ts_end++
+	}
+	ts_str := bytes[i..ts_end].bytestr()
+	if ts_end < bytes.len {
+		i = ts_end + 1 // skip ]
+	}
+
+	// Parse timestamp: DD/Mon/YYYY:HH:MM:SS ±HHMM
+	parsed_ts := clf_parse_timestamp(ts_str)!
+
+	// Read request: "method path protocol"
+	clf_skip_spaces(bytes, mut &i)
+	if i >= bytes.len || bytes[i] != `"` {
+		return error('parse_common_log: expected " for request')
+	}
+	i++ // skip opening "
+	mut req_end := i
+	for req_end < bytes.len && bytes[req_end] != `"` {
+		req_end++
+	}
+	request := bytes[i..req_end].bytestr()
+	if req_end < bytes.len {
+		i = req_end + 1 // skip closing "
+	}
+
+	// Parse method, path, protocol from request
+	req_parts := request.split(' ')
+	method := if req_parts.len >= 1 { req_parts[0] } else { '' }
+	path := if req_parts.len >= 2 { req_parts[1] } else { '' }
+	protocol := if req_parts.len >= 3 { req_parts[2] } else { '' }
+
+	// Read status
+	status_str := clf_read_token(bytes, mut &i)
+	// Read size
+	size_str := clf_read_token(bytes, mut &i)
+
+	mut result := new_object_map()
+	result.set('host', clf_value_or_null(host))
+	if identity != '-' {
+		result.set('identity', VrlValue(identity))
+	}
+	result.set('user', clf_value_or_null(user))
+	result.set('timestamp', VrlValue(parsed_ts))
+	result.set('message', VrlValue(request))
+	result.set('method', VrlValue(method))
+	result.set('path', VrlValue(path))
+	result.set('protocol', VrlValue(protocol))
+	result.set('status', if status_str == '-' {
+		VrlValue(VrlNull{})
+	} else {
+		VrlValue(i64(status_str.int()))
+	})
+	result.set('size', if size_str == '-' {
+		VrlValue(VrlNull{})
+	} else {
+		VrlValue(i64(size_str.int()))
+	})
+	return VrlValue(result)
+}
+
+fn clf_skip_spaces(bytes []u8, mut i &int) {
+	unsafe {
+		for *i < bytes.len && (bytes[*i] == ` ` || bytes[*i] == `\t`) {
+			*i = *i + 1
+		}
+	}
+}
+
+fn clf_read_token(bytes []u8, mut i &int) string {
+	clf_skip_spaces(bytes, mut i)
+	mut start := unsafe { *i }
+	unsafe {
+		for *i < bytes.len && bytes[*i] != ` ` && bytes[*i] != `\t` {
+			*i = *i + 1
+		}
+		return bytes[start..*i].bytestr()
+	}
+}
+
+fn clf_value_or_null(s string) VrlValue {
+	if s == '-' {
+		return VrlValue(VrlNull{})
+	}
+	return VrlValue(s)
+}
+
+// parse_klog(value) - Parse Kubernetes log format (klog)
+// Format: <level><monthday> <time> <pid> <file>:<line>] <message>
+// Example: I0505 17:59:40.692994   28133 miscellaneous.go:42] some message
+fn fn_parse_klog(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('parse_klog requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('parse_klog requires a string') }
+	}
+	trimmed := s.trim_space()
+	if trimmed.len < 2 {
+		return error('unable to parse klog: input too short')
+	}
+	// Parse level character: I=info, W=warning, E=error, F=fatal
+	level_char := trimmed[0]
+	level := match level_char {
+		`I` { 'info' }
+		`W` { 'warning' }
+		`E` { 'error' }
+		`F` { 'fatal' }
+		else { return error('unable to parse klog: unknown level character: ${[level_char].bytestr()}') }
+	}
+	// Parse monthday (4 digits: MMDD)
+	mut i := 1
+	if i + 4 > trimmed.len {
+		return error('unable to parse klog: missing date')
+	}
+	month_str := trimmed[i..i + 2]
+	day_str := trimmed[i + 2..i + 4]
+	i += 4
+	// Skip space
+	if i >= trimmed.len || trimmed[i] != ` ` {
+		return error('unable to parse klog: expected space after date')
+	}
+	i++
+	// Parse time (HH:MM:SS.microseconds)
+	mut time_end := i
+	for time_end < trimmed.len && trimmed[time_end] != ` ` {
+		time_end++
+	}
+	time_str := trimmed[i..time_end]
+	i = time_end
+	// Skip spaces
+	for i < trimmed.len && trimmed[i] == ` ` {
+		i++
+	}
+	// Parse PID
+	mut pid_end := i
+	for pid_end < trimmed.len && trimmed[pid_end] != ` ` {
+		pid_end++
+	}
+	pid_str := trimmed[i..pid_end]
+	i = pid_end
+	// Skip spaces
+	for i < trimmed.len && trimmed[i] == ` ` {
+		i++
+	}
+	// Parse file:line] - find the closing bracket
+	mut bracket_pos := i
+	for bracket_pos < trimmed.len && trimmed[bracket_pos] != `]` {
+		bracket_pos++
+	}
+	if bracket_pos >= trimmed.len {
+		return error('unable to parse klog: missing ] delimiter')
+	}
+	file_line := trimmed[i..bracket_pos]
+	// Split file:line
+	mut file := file_line
+	mut line := ''
+	if colon_idx := file_line.last_index(':') {
+		file = file_line[..colon_idx]
+		line = file_line[colon_idx + 1..]
+	}
+	i = bracket_pos + 1
+	// Skip space after ]
+	if i < trimmed.len && trimmed[i] == ` ` {
+		i++
+	}
+	// Rest is message (trim trailing whitespace like upstream)
+	message := if i < trimmed.len { trimmed[i..].trim_right(' \t\n\r') } else { '' }
+	// Resolve year: if current month is January and log month is December, use previous year
+	now := time.now()
+	month_val := month_str.int()
+	year := if now.month == 1 && month_val == 12 { now.year - 1 } else { now.year }
+	// Build and parse timestamp
+	ts_str := '${year}${month_str}${day_str} ${time_str}'
+	// Parse: YYYYMMDD HH:MM:SS.ffffff
+	t := time.parse_format(ts_str, 'YYYYMMDD HH:mm:ss') or {
+		return error('failed parsing timestamp ${month_str}${day_str} ${time_str}')
+	}
+	// Extract microseconds from the time string (after the dot)
+	mut microseconds := 0
+	if dot_idx := time_str.index('.') {
+		usec_str := time_str[dot_idx + 1..]
+		if usec_str.len >= 6 {
+			microseconds = usec_str[..6].int()
+		} else {
+			microseconds = usec_str.int()
+			// Pad with zeros
+			for _ in 0 .. 6 - usec_str.len {
+				microseconds *= 10
+			}
+		}
+	}
+	ts := Timestamp{
+		t: time.Time{
+			year: t.year
+			month: t.month
+			day: t.day
+			hour: t.hour
+			minute: t.minute
+			second: t.second
+			nanosecond: microseconds * 1000
+		}
+	}
+	mut result := new_object_map()
+	result.set('file', VrlValue(file))
+	result.set('id', VrlValue(i64(pid_str.int())))
+	result.set('level', VrlValue(level))
+	result.set('line', VrlValue(i64(line.int())))
+	result.set('message', VrlValue(message))
+	result.set('timestamp', VrlValue(ts))
+	return VrlValue(result)
+}
+
+// parse_linux_authorization(value) - Parse Linux authorization log lines
+// Format: <timestamp> <hostname> <process>[<pid>]: <message>
+// Example: Mar  5 14:17:01 myhost CRON[1234]: pam_unix(cron:session): session opened
+fn fn_parse_linux_authorization(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('parse_linux_authorization requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('parse_linux_authorization requires a string') }
+	}
+	bytes := s.bytes()
+	mut i := 0
+	// Parse timestamp: "Mon DD HH:MM:SS" or "Mon  D HH:MM:SS"
+	// Month (3 chars)
+	if i + 3 > bytes.len {
+		return error('unable to parse linux authorization log: input too short')
+	}
+	month := s[i..i + 3]
+	i += 3
+	// Skip spaces
+	for i < bytes.len && bytes[i] == ` ` {
+		i++
+	}
+	// Day (1-2 digits)
+	mut day_start := i
+	for i < bytes.len && bytes[i] >= `0` && bytes[i] <= `9` {
+		i++
+	}
+	if i == day_start {
+		return error('unable to parse linux authorization log: missing day')
+	}
+	day := s[day_start..i]
+	// Skip space
+	for i < bytes.len && bytes[i] == ` ` {
+		i++
+	}
+	// Time (HH:MM:SS)
+	mut time_start := i
+	for i < bytes.len && bytes[i] != ` ` {
+		i++
+	}
+	timestamp_time := s[time_start..i]
+	timestamp := '${month} ${day} ${timestamp_time}'
+	// Skip space
+	for i < bytes.len && bytes[i] == ` ` {
+		i++
+	}
+	// Hostname
+	mut host_start := i
+	for i < bytes.len && bytes[i] != ` ` {
+		i++
+	}
+	hostname := s[host_start..i]
+	// Skip space
+	for i < bytes.len && bytes[i] == ` ` {
+		i++
+	}
+	// Process and optional PID: "process[pid]:" or "process:"
+	mut proc_start := i
+	mut process := ''
+	mut pid := VrlValue(VrlNull{})
+	// Find the colon that follows the process/pid
+	mut colon_pos := -1
+	for j := i; j < bytes.len; j++ {
+		if bytes[j] == `:` {
+			colon_pos = j
+			break
+		}
+	}
+	if colon_pos < 0 {
+		return error('unable to parse linux authorization log: missing colon after process')
+	}
+	proc_part := s[proc_start..colon_pos]
+	// Check for [pid]
+	if bracket_start := proc_part.index('[') {
+		process = proc_part[..bracket_start]
+		bracket_end := proc_part.index(']') or { proc_part.len }
+		pid_str := proc_part[bracket_start + 1..bracket_end]
+		pid = VrlValue(i64(pid_str.int()))
+	} else {
+		process = proc_part
+	}
+	i = colon_pos + 1
+	// Skip space after colon
+	for i < bytes.len && bytes[i] == ` ` {
+		i++
+	}
+	// Rest is message
+	message := if i < bytes.len { s[i..] } else { '' }
+	mut result := new_object_map()
+	result.set('timestamp', VrlValue(timestamp))
+	result.set('hostname', VrlValue(hostname))
+	result.set('appname', VrlValue(process))
+	result.set('procid', pid)
+	result.set('message', VrlValue(message))
+	return VrlValue(result)
+}
+
+// get_timezone_name() - Returns the system timezone name
+fn fn_get_timezone_name(args []VrlValue) !VrlValue {
+	// Check TZ environment variable first
+	tz_env := os.getenv('TZ')
+	if tz_env.len > 0 {
+		return VrlValue(tz_env)
+	}
+	// Try reading /etc/timezone (Debian/Ubuntu)
+	tz_file := os.read_file('/etc/timezone') or { '' }
+	if tz_file.len > 0 {
+		return VrlValue(tz_file.trim_space())
+	}
+	// Try reading /etc/localtime symlink target (RHEL/CentOS/Arch)
+	link_target := os.real_path('/etc/localtime')
+	if zi_pos := link_target.index('/zoneinfo/') {
+		start := zi_pos + 10
+		if start < link_target.len {
+			tz_name := link_target[start..]
+			if tz_name.len > 0 {
+				// Normalize Etc/UTC and Etc/GMT to UTC
+				if tz_name == 'Etc/UTC' || tz_name == 'Etc/GMT' {
+					return VrlValue('UTC')
+				}
+				return VrlValue(tz_name)
+			}
+		}
+	}
+	// Fallback to UTC
+	return VrlValue('UTC')
+}
+
+// haversine(lat1, lon1, lat2, lon2, [measurement_unit]) - Calculate great-circle distance
+// and bearing between two points.
+// Returns an object with "distance" and "bearing" fields.
+// measurement_unit: "kilometers" (default) or "miles"
+// Formula: 2 * R * asin(sqrt(sin²(Δlat/2) + cos(lat1)*cos(lat2)*sin²(Δlon/2)))
+fn fn_haversine(args []VrlValue) !VrlValue {
+	if args.len < 4 {
+		return error('haversine requires 4 arguments (lat1, lon1, lat2, lon2)')
+	}
+	lat1 := get_float_arg(args[0]) or { return error('haversine: lat1 must be a number') }
+	lon1 := get_float_arg(args[1]) or { return error('haversine: lon1 must be a number') }
+	lat2 := get_float_arg(args[2]) or { return error('haversine: lat2 must be a number') }
+	lon2 := get_float_arg(args[3]) or { return error('haversine: lon2 must be a number') }
+	unit := if args.len > 4 {
+		v := args[4]
+		match v {
+			string { v }
+			else { 'kilometers' }
+		}
+	} else {
+		'kilometers'
+	}
+	earth_radius_km := 6_371.0088
+	earth_radius := if unit == 'miles' { earth_radius_km * 0.6213712 } else { earth_radius_km }
+	lat1_rad := lat1 * math.pi / 180.0
+	lon1_rad := lon1 * math.pi / 180.0
+	lat2_rad := lat2 * math.pi / 180.0
+	lon2_rad := lon2 * math.pi / 180.0
+	dlat := lat2_rad - lat1_rad
+	dlon := lon2_rad - lon1_rad
+	a := math.sin(dlat / 2.0) * math.sin(dlat / 2.0) + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2.0) * math.sin(dlon / 2.0)
+	distance_raw := 2.0 * math.asin(math.sqrt(a)) * earth_radius
+	distance := round_to_precision_f64(distance_raw, 7)
+	// Bearing calculation
+	y := math.sin(dlon) * math.cos(lat2_rad)
+	x := math.cos(lat1_rad) * math.sin(lat2_rad) - math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(dlon)
+	bearing_raw := math.fmod(math.atan2(y, x) * 180.0 / math.pi + 360.0, 360.0)
+	bearing := round_to_precision_f64(bearing_raw, 3)
+	mut result := new_object_map()
+	result.set('bearing', VrlValue(bearing))
+	result.set('distance', VrlValue(distance))
+	return VrlValue(result)
+}
+
+fn round_to_precision_f64(val f64, precision int) f64 {
+	mut mult := 1.0
+	for _ in 0 .. precision {
+		mult *= 10.0
+	}
+	return math.round(val * mult) / mult
+}
+
+// Helper to extract a float from a VrlValue
+fn get_float_arg(v VrlValue) !f64 {
+	return match v {
+		f64 { v }
+		i64 { f64(v) }
+		else { error('expected number') }
+	}
+}
+
+fn clf_parse_timestamp(s string) !Timestamp {
+	// Format: DD/Mon/YYYY:HH:MM:SS ±HHMM
+	// Example: 03/Feb/2021:21:13:55 -0200
+	if s.len < 20 {
+		return error('invalid CLF timestamp: ${s}')
+	}
+	day := s[0..2].int()
+	month_str := s[3..6]
+	year := s[7..11].int()
+	hour := s[12..14].int()
+	minute := s[15..17].int()
+	second := s[18..20].int()
+
+	month_num := month_abbrev_to_number(month_str)!
+
+	// Parse timezone offset if present
+	mut tz_offset_seconds := 0
+	if s.len > 20 {
+		tz_part := s[20..].trim_space()
+		if tz_part.len >= 5 && (tz_part[0] == `+` || tz_part[0] == `-`) {
+			tz_hh := tz_part[1..3].int()
+			tz_mm := tz_part[3..5].int()
+			tz_offset_seconds = (tz_hh * 3600 + tz_mm * 60)
+			if tz_part[0] == `-` {
+				tz_offset_seconds = -tz_offset_seconds
+			}
+		}
+	}
+
+	// Build timestamp in UTC
+	t := time.Time{
+		year: year
+		month: month_num.int()
+		day: day
+		hour: hour
+		minute: minute
+		second: second
+	}
+	// Convert from local (with offset) to UTC by subtracting the offset
+	utc := time.unix(t.unix() - tz_offset_seconds)
+	return Timestamp{t: utc}
+}
+
+// parse_syslog(value) - parses a syslog message (RFC 3164 and RFC 5424)
+fn fn_parse_syslog(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('parse_syslog requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('parse_syslog requires a string') }
+	}
+	if s.len < 3 || s[0] != `<` {
+		return error('parse_syslog: expected <priority>')
+	}
+
+	// Parse priority: <NNN>
+	mut i := 1
+	for i < s.len && s[i] != `>` {
+		i++
+	}
+	if i >= s.len {
+		return error('parse_syslog: unterminated priority')
+	}
+	pri_str := s[1..i]
+	priority := pri_str.int()
+	i++ // skip >
+
+	facility := priority / 8
+	severity := priority % 8
+
+	// Determine RFC 5424 vs 3164: RFC 5424 has a version digit right after >
+	if i < s.len && s[i].is_digit() {
+		return parse_syslog_rfc5424(s[i..], facility, severity)
+	}
+	return parse_syslog_rfc3164(s[i..], facility, severity)
+}
+
+fn syslog_facility_name(code int) string {
+	facilities := ['kern', 'user', 'mail', 'daemon', 'auth', 'syslog', 'lpr', 'news',
+		'uucp', 'cron', 'authpriv', 'ftp', 'ntp', 'security', 'console', 'solaris-cron',
+		'local0', 'local1', 'local2', 'local3', 'local4', 'local5', 'local6', 'local7']
+	if code >= 0 && code < facilities.len {
+		return facilities[code]
+	}
+	return 'unknown'
+}
+
+fn syslog_severity_name(code int) string {
+	severities := ['emerg', 'alert', 'crit', 'err', 'warning', 'notice', 'info', 'debug']
+	if code >= 0 && code < severities.len {
+		return severities[code]
+	}
+	return 'unknown'
+}
+
+fn parse_syslog_rfc5424(s string, facility int, severity int) !VrlValue {
+	// Format: version SP timestamp SP hostname SP appname SP procid SP msgid SP structured-data [SP message]
+	// Example: 1 2021-02-03T21:13:55-02:00 hostname appname 1234 msgid [sd@123 key="val"] message
+	mut result := new_object_map()
+	result.set('facility', VrlValue(syslog_facility_name(facility)))
+	result.set('severity', VrlValue(syslog_severity_name(severity)))
+
+	mut pos := 0
+	bytes := s.bytes()
+
+	// Version
+	version_str := syslog_read_token(bytes, mut &pos)
+	result.set('version', VrlValue(i64(version_str.int())))
+
+	// Timestamp
+	ts_str := syslog_read_token(bytes, mut &pos)
+	if ts_str == '-' {
+		result.set('timestamp', VrlValue(VrlNull{}))
+	} else {
+		result.set('timestamp', VrlValue(ts_str))
+	}
+
+	// Hostname
+	hostname := syslog_read_token(bytes, mut &pos)
+	result.set('hostname', syslog_value_or_null(hostname))
+
+	// Appname
+	appname := syslog_read_token(bytes, mut &pos)
+	result.set('appname', syslog_value_or_null(appname))
+
+	// Procid
+	procid := syslog_read_token(bytes, mut &pos)
+	result.set('procid', syslog_value_or_null(procid))
+
+	// Msgid
+	msgid := syslog_read_token(bytes, mut &pos)
+	result.set('msgid', syslog_value_or_null(msgid))
+
+	// Structured data
+	syslog_skip_spaces(bytes, mut &pos)
+	if pos < bytes.len && bytes[pos] == `[` {
+		// Parse structured data elements
+		for pos < bytes.len && bytes[pos] == `[` {
+			pos++ // skip [
+			// Read SD-ID
+			mut sd_id_end := pos
+			for sd_id_end < bytes.len && bytes[sd_id_end] != ` ` && bytes[sd_id_end] != `]` {
+				sd_id_end++
+			}
+			// sd_id := bytes[pos..sd_id_end].bytestr()  // available if needed
+			pos = sd_id_end
+
+			// Parse key=value pairs within the SD element
+			for pos < bytes.len && bytes[pos] != `]` {
+				syslog_skip_spaces(bytes, mut &pos)
+				if pos < bytes.len && bytes[pos] == `]` {
+					break
+				}
+				// Read key
+				mut key_end := pos
+				for key_end < bytes.len && bytes[key_end] != `=` && bytes[key_end] != `]`
+					&& bytes[key_end] != ` ` {
+					key_end++
+				}
+				key := bytes[pos..key_end].bytestr()
+				pos = key_end
+				if pos < bytes.len && bytes[pos] == `=` {
+					pos++ // skip =
+					// Read value (quoted)
+					if pos < bytes.len && bytes[pos] == `"` {
+						pos++ // skip opening "
+						mut val := []u8{}
+						for pos < bytes.len && bytes[pos] != `"` {
+							if bytes[pos] == `\\` && pos + 1 < bytes.len {
+								pos++
+								val << bytes[pos]
+							} else {
+								val << bytes[pos]
+							}
+							pos++
+						}
+						if pos < bytes.len {
+							pos++ // skip closing "
+						}
+						if key.len > 0 {
+							result.set(key, VrlValue(val.bytestr()))
+						}
+					} else {
+						// Unquoted value (non-standard but handle gracefully)
+						mut val_end := pos
+						for val_end < bytes.len && bytes[val_end] != ` `
+							&& bytes[val_end] != `]` {
+							val_end++
+						}
+						if key.len > 0 {
+							result.set(key, VrlValue(bytes[pos..val_end].bytestr()))
+						}
+						pos = val_end
+					}
+				}
+			}
+			if pos < bytes.len && bytes[pos] == `]` {
+				pos++ // skip ]
+			}
+		}
+	} else if pos < bytes.len {
+		// NILVALUE for structured data
+		token := syslog_read_token(bytes, mut &pos)
+		_ = token // discard the '-'
+	}
+
+	// Message (rest of string after optional space)
+	syslog_skip_spaces(bytes, mut &pos)
+	if pos < bytes.len {
+		msg := bytes[pos..].bytestr()
+		result.set('message', VrlValue(msg))
+	} else {
+		result.set('message', VrlValue(VrlNull{}))
+	}
+
+	return VrlValue(result)
+}
+
+fn parse_syslog_rfc3164(s string, facility int, severity int) !VrlValue {
+	// Format: timestamp hostname message
+	// Timestamp: "Mon DD HH:MM:SS" (BSD format) or could be other formats
+	// Example: Feb  3 21:13:55 myhost my message here
+	mut result := new_object_map()
+	result.set('facility', VrlValue(syslog_facility_name(facility)))
+	result.set('severity', VrlValue(syslog_severity_name(severity)))
+
+	trimmed := s.trim_left(' ')
+	bytes := trimmed.bytes()
+	mut pos := 0
+
+	// Try to parse BSD timestamp: "Mon DD HH:MM:SS" or "Mon  D HH:MM:SS"
+	if trimmed.len >= 15 {
+		month_str := trimmed[0..3]
+		month_num := month_abbrev_to_number(month_str) or {
+			// Not a recognized month, treat entire string as message
+			result.set('timestamp', VrlValue(VrlNull{}))
+			result.set('hostname', VrlValue(VrlNull{}))
+			result.set('appname', VrlValue(VrlNull{}))
+			result.set('procid', VrlValue(VrlNull{}))
+			result.set('msgid', VrlValue(VrlNull{}))
+			result.set('message', VrlValue(trimmed))
+			result.set('version', VrlValue(VrlNull{}))
+			return VrlValue(result)
+		}
+		// Skip month and spaces
+		pos = 3
+		syslog_skip_spaces(bytes, mut &pos)
+
+		// Read day
+		mut day_end := pos
+		for day_end < bytes.len && bytes[day_end].is_digit() {
+			day_end++
+		}
+		day_str := bytes[pos..day_end].bytestr()
+		day := '${day_str.int():02d}'
+		pos = day_end
+		syslog_skip_spaces(bytes, mut &pos)
+
+		// Read time: HH:MM:SS
+		if pos + 8 <= bytes.len {
+			time_str := bytes[pos..pos + 8].bytestr()
+			pos += 8
+
+			// Build an RFC3339-like timestamp (no year in BSD syslog, use current year)
+			ts := '${time.now().year}-${month_num}-${day}T${time_str}+00:00'
+			result.set('timestamp', VrlValue(ts))
+		} else {
+			result.set('timestamp', VrlValue(VrlNull{}))
+		}
+	} else {
+		result.set('timestamp', VrlValue(VrlNull{}))
+	}
+
+	// Hostname
+	syslog_skip_spaces(bytes, mut &pos)
+	hostname := syslog_read_token(bytes, mut &pos)
+	result.set('hostname', syslog_value_or_null(hostname))
+
+	// Try to extract appname[procid]: from the message prefix
+	syslog_skip_spaces(bytes, mut &pos)
+	remaining := if pos < bytes.len { bytes[pos..].bytestr() } else { '' }
+
+	// Check for "appname[procid]: message" or "appname: message" pattern
+	mut appname := VrlValue(VrlNull{})
+	mut procid := VrlValue(VrlNull{})
+	mut message := remaining
+
+	if colon_idx := remaining.index(': ') {
+		prefix := remaining[..colon_idx]
+		if bracket_idx := prefix.index('[') {
+			// appname[procid]
+			appname = VrlValue(prefix[..bracket_idx])
+			pid := prefix[bracket_idx + 1..].trim_right(']')
+			procid = VrlValue(pid)
+		} else {
+			appname = VrlValue(prefix)
+		}
+		message = remaining[colon_idx + 2..]
+	}
+
+	result.set('appname', appname)
+	result.set('procid', procid)
+	result.set('msgid', VrlValue(VrlNull{}))
+	result.set('version', VrlValue(VrlNull{}))
+	result.set('message', VrlValue(message))
+
+	return VrlValue(result)
+}
+
+fn syslog_skip_spaces(bytes []u8, mut i &int) {
+	unsafe {
+		for *i < bytes.len && (bytes[*i] == ` ` || bytes[*i] == `\t`) {
+			*i = *i + 1
+		}
+	}
+}
+
+fn syslog_read_token(bytes []u8, mut i &int) string {
+	syslog_skip_spaces(bytes, mut i)
+	mut start := unsafe { *i }
+	unsafe {
+		for *i < bytes.len && bytes[*i] != ` ` && bytes[*i] != `\t` {
+			*i = *i + 1
+		}
+		return bytes[start..*i].bytestr()
+	}
+}
+
+fn syslog_value_or_null(s string) VrlValue {
+	if s == '-' || s.len == 0 {
+		return VrlValue(VrlNull{})
+	}
+	return VrlValue(s)
+}
+
+// parse_logfmt(value) - parses a logfmt-formatted string into an object
+fn fn_parse_logfmt(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('parse_logfmt requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('parse_logfmt requires a string') }
+	}
+	mut result := new_object_map()
+	mut i := 0
+	bytes := s.bytes()
+	for i < bytes.len {
+		// Skip whitespace
+		for i < bytes.len && (bytes[i] == ` ` || bytes[i] == `\t`) {
+			i++
+		}
+		if i >= bytes.len {
+			break
+		}
+		// Read key
+		mut key_start := i
+		for i < bytes.len && bytes[i] != `=` && bytes[i] != ` ` && bytes[i] != `\t` {
+			i++
+		}
+		key := bytes[key_start..i].bytestr()
+		if key.len == 0 {
+			i++
+			continue
+		}
+		// Check for = sign
+		if i >= bytes.len || bytes[i] != `=` {
+			// Key without value - per logfmt spec, standalone keys are boolean true
+			result.set(key, VrlValue(true))
+			continue
+		}
+		i++ // skip '='
+		// Read value
+		if i >= bytes.len || bytes[i] == ` ` || bytes[i] == `\t` {
+			// Empty value
+			result.set(key, VrlValue(''))
+			continue
+		}
+		if bytes[i] == `"` || bytes[i] == `'` {
+			// Quoted value
+			quote := bytes[i]
+			i++
+			mut val := []u8{}
+			for i < bytes.len && bytes[i] != quote {
+				if bytes[i] == `\\` && i + 1 < bytes.len {
+					next := bytes[i + 1]
+					if next == quote || next == `\\` {
+						val << next
+						i += 2
+						continue
+					}
+				}
+				val << bytes[i]
+				i++
+			}
+			if i < bytes.len {
+				i++ // skip closing quote
+			}
+			result.set(key, VrlValue(val.bytestr()))
+		} else {
+			// Unquoted value
+			mut val_start := i
+			for i < bytes.len && bytes[i] != ` ` && bytes[i] != `\t` {
+				i++
+			}
+			result.set(key, VrlValue(bytes[val_start..i].bytestr()))
+		}
+	}
+	return VrlValue(result)
 }

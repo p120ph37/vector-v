@@ -141,9 +141,11 @@ pub:
 }
 
 // OkErrAssignExpr represents `ok_target, err_target = expr`
+// When is_merge is true, it represents `ok_target, err_target |= expr` (merge assign).
 pub struct OkErrAssignExpr {
 pub:
 	ok_target  []Expr // PathExpr or IdentExpr for the ok value
 	err_target []Expr // PathExpr or IdentExpr for the err value
 	value      []Expr // the expression to evaluate
+	is_merge   bool   // true for |= (merge assignment)
 }

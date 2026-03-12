@@ -1,5 +1,6 @@
 module vrl
 
+import regex.pcre
 import time
 
 // Parser turns a token stream into an AST.
@@ -48,7 +49,7 @@ fn (mut p Parser) parse_assignment() !Expr {
 	// The ok target (left) must be a path or ident, and the err target is a simple path/ident.
 	if p.current().kind == .comma {
 		l := left
-		ok_is_target := l is PathExpr || l is IdentExpr || l is MetaPathExpr
+		ok_is_target := l is PathExpr || l is IdentExpr || l is MetaPathExpr || l is IndexExpr
 		if ok_is_target {
 			saved_pos := p.pos
 			p.advance() // skip comma
@@ -92,7 +93,8 @@ fn (mut p Parser) parse_assignment() !Expr {
 				err_target = target_expr
 				got_target = true
 			}
-			if got_target && p.current().kind == .assign {
+			if got_target && (p.current().kind == .assign || p.current().kind == .pipe_assign) {
+				is_merge := p.current().kind == .pipe_assign
 				p.advance()
 				p.skip_newlines()
 				right := p.parse_assignment()!
@@ -100,6 +102,7 @@ fn (mut p Parser) parse_assignment() !Expr {
 					ok_target: [left]
 					err_target: [err_target]
 					value: [right]
+					is_merge: is_merge
 				})
 			}
 			// Not an ok/err assignment, backtrack
@@ -108,6 +111,13 @@ fn (mut p Parser) parse_assignment() !Expr {
 	}
 
 	if p.current().kind == .assign {
+		// Check for reserved keyword as assignment target
+		l := left
+		if l is IdentExpr {
+			if l.name in ['array', 'object', 'string', 'integer', 'float', 'boolean', 'null', 'regex', 'timestamp'] {
+				return error('reserved keyword: ${l.name}')
+			}
+		}
 		p.advance()
 		p.skip_newlines()
 		right := p.parse_assignment()!
@@ -193,8 +203,12 @@ fn (mut p Parser) parse_and() !Expr {
 
 fn (mut p Parser) parse_equality() !Expr {
 	mut left := p.parse_comparison()!
+	mut had_equality := false
 
 	for p.current().kind in [.eq, .neq] {
+		if had_equality {
+			return error("comparison operators can't be chained together")
+		}
 		op := p.current().lit
 		p.advance()
 		p.skip_newlines()
@@ -204,6 +218,7 @@ fn (mut p Parser) parse_equality() !Expr {
 			left: [left]
 			right: [right]
 		})
+		had_equality = true
 	}
 
 	return left
@@ -211,8 +226,12 @@ fn (mut p Parser) parse_equality() !Expr {
 
 fn (mut p Parser) parse_comparison() !Expr {
 	mut left := p.parse_addition()!
+	mut had_comparison := false
 
 	for p.current().kind in [.lt, .gt, .le, .ge] {
+		if had_comparison {
+			return error("comparison operators can't be chained together")
+		}
 		op := p.current().lit
 		p.advance()
 		p.skip_newlines()
@@ -222,6 +241,7 @@ fn (mut p Parser) parse_comparison() !Expr {
 			left: [left]
 			right: [right]
 		})
+		had_comparison = true
 	}
 
 	return left
@@ -283,6 +303,10 @@ fn (mut p Parser) parse_postfix() !Expr {
 	for {
 		// Handle postfix indexing: expr[index]
 		if p.current().kind == .lbracket {
+			// Reject indexing on scalar literals (true[0], 0[0], "foo"[0], null[0], etc.)
+			if is_scalar_literal(expr) {
+				return error('syntax error')
+			}
 			p.advance()
 			index := p.parse_expr()!
 			if p.current().kind == .rbracket {
@@ -296,6 +320,10 @@ fn (mut p Parser) parse_postfix() !Expr {
 		}
 		// Handle postfix property access: expr.ident
 		if p.current().kind == .dot_ident {
+			// Reject property access on scalar literals (true.foo, 0.foo, null.foo, etc.)
+			if is_scalar_literal(expr) {
+				return error('syntax error')
+			}
 			path := p.current().lit // e.g. ".foo" or ".foo.bar"
 			p.advance()
 			// Extract the property name(s) from the dot_ident
@@ -311,6 +339,10 @@ fn (mut p Parser) parse_postfix() !Expr {
 		}
 		if p.current().kind == .dot && p.pos + 1 < p.tokens.len
 			&& p.tokens[p.pos + 1].kind == .ident {
+			// Reject property access on scalar literals
+			if is_scalar_literal(expr) {
+				return error('syntax error')
+			}
 			p.advance() // skip .
 			prop := p.current().lit
 			p.advance()
@@ -324,6 +356,19 @@ fn (mut p Parser) parse_postfix() !Expr {
 	}
 
 	return expr
+}
+
+// is_scalar_literal returns true if the expression is a literal with a scalar value
+// (bool, int, float, string, null, timestamp, regex). These cannot have property/index access.
+fn is_scalar_literal(expr Expr) bool {
+	if expr is LiteralExpr {
+		v := expr.value
+		match v {
+			bool, i64, f64, string, VrlNull, Timestamp, VrlRegex { return true }
+			else { return false }
+		}
+	}
+	return false
 }
 
 fn (mut p Parser) parse_primary() !Expr {
@@ -348,11 +393,17 @@ fn (mut p Parser) parse_primary() !Expr {
 		}
 		.regex_lit {
 			p.advance()
+			// Validate regex at parse time
+			validate_regex(tok.lit) or {
+				return error('invalid regular expression: ${err.msg()}')
+			}
 			return Expr(LiteralExpr{value: VrlValue(VrlRegex{pattern: tok.lit})})
 		}
 		.timestamp_lit {
 			p.advance()
-			ts := parse_timestamp_lit(tok.lit)
+			ts := parse_timestamp_lit(tok.lit) or {
+				return error('invalid timestamp format: ${err.msg()}')
+			}
 			return Expr(LiteralExpr{value: VrlValue(ts)})
 		}
 		.true_lit {
@@ -787,13 +838,20 @@ fn (mut p Parser) parse_template(s string) !Expr {
 	return result
 }
 
+// validate_regex checks if a regex pattern is valid by trying to compile it.
+fn validate_regex(pattern string) ! {
+	_ := pcre.new_regex(pattern, 0) or {
+		return error('regex parse error: ${err.msg()}')
+	}
+}
+
 // parse_timestamp_lit parses an RFC3339 timestamp string like "2021-02-02T19:41:00Z"
-fn parse_timestamp_lit(s string) Timestamp {
+fn parse_timestamp_lit(s string) !Timestamp {
 	// Try RFC3339 format: 2021-02-02T19:41:00Z or with offset
 	t := time.parse_rfc3339(s) or {
 		// Try other common formats
 		time.parse(s) or {
-			return Timestamp{}
+			return error('input contains invalid characters')
 		}
 	}
 	return Timestamp{t: t}
