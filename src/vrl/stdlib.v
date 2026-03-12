@@ -3,7 +3,7 @@ module vrl
 import math
 import os
 import rand
-import regex
+import regex.pcre
 import time
 
 // resolve_named_args evaluates function arguments and resolves named args into a map.
@@ -562,24 +562,11 @@ fn fn_replace(args []VrlValue) !VrlValue {
 			return VrlValue(s.replace(p, replacement))
 		}
 		VrlRegex {
-			mut re := regex.regex_opt(p.pattern) or { return VrlValue(s) }
+			re := pcre.compile(p.pattern) or { return VrlValue(s) }
 			if count == 1 {
-				// Replace only first match
-				start, end := re.find(s)
-				if start >= 0 {
-					result := s[..start] + replacement + s[end..]
-					return VrlValue(result)
-				}
-				return VrlValue(s)
+				return VrlValue(re.replace(s, replacement))
 			}
-			// Replace all matches
-			mut result := s
-			for _ in 0 .. 100 { // safety limit
-				start2, end2 := re.find(result)
-				if start2 < 0 { break }
-				result = result[..start2] + replacement + result[end2..]
-			}
-			return VrlValue(result)
+			return VrlValue(pcre_replace_all(re, s, replacement))
 		}
 		else { return error('replace second arg must be string or regex') }
 	}
@@ -628,7 +615,7 @@ fn split_string_with_limit(s string, delim string, limit int) !VrlValue {
 }
 
 fn split_regex_with_limit(s string, pattern string, limit int) !VrlValue {
-	mut re := regex.regex_opt(pattern) or { return error('invalid regex in split') }
+	re := pcre.compile(pattern) or { return error('invalid regex in split') }
 	mut result := []VrlValue{}
 	mut pos := 0
 	mut count := 0
@@ -637,15 +624,14 @@ fn split_regex_with_limit(s string, pattern string, limit int) !VrlValue {
 			result << VrlValue(s[pos..])
 			return VrlValue(result)
 		}
-		start, end := re.find(s[pos..])
-		if start < 0 {
+		m := re.find_from(s, pos) or {
 			result << VrlValue(s[pos..])
 			return VrlValue(result)
 		}
-		result << VrlValue(s[pos..pos + start])
-		pos = pos + end
+		result << VrlValue(s[pos..m.start])
+		pos = m.end
 		count++
-		if start == end {
+		if m.start == m.end {
 			if pos < s.len {
 				result << VrlValue(s[pos..pos + 1])
 				count++
@@ -654,6 +640,30 @@ fn split_regex_with_limit(s string, pattern string, limit int) !VrlValue {
 		}
 	}
 	return VrlValue(result)
+}
+
+// pcre_replace_all replaces all matches of a pcre regex in a string.
+fn pcre_replace_all(re pcre.Regex, s string, replacement string) string {
+	matches := re.find_all(s)
+	if matches.len == 0 { return s }
+	mut result := []u8{}
+	mut pos := 0
+	for m in matches {
+		// Append text before this match
+		for i in pos .. m.start {
+			result << s[i]
+		}
+		// Append replacement
+		for c in replacement {
+			result << c
+		}
+		pos = m.end
+	}
+	// Append remaining text
+	for i in pos .. s.len {
+		result << s[i]
+	}
+	return result.bytestr()
 }
 
 fn fn_join(args []VrlValue) !VrlValue {
@@ -795,8 +805,9 @@ fn fn_to_float(args []VrlValue) !VrlValue {
 		}
 		VrlNull { return VrlValue(0.0) }
 		Timestamp {
-			// Convert to Unix timestamp as float (seconds)
-			return VrlValue(f64(a.t.unix()))
+			// Convert to Unix timestamp as float (seconds.microseconds)
+			micros := a.t.unix_micro()
+			return VrlValue(f64(micros) / 1_000_000.0)
 		}
 		else { return error("can't convert to float") }
 	}
@@ -1291,7 +1302,7 @@ fn fn_decode_json(args []VrlValue) !VrlValue {
 	match a {
 		string {
 			if max_depth > 0 {
-				return parse_json_with_depth(a, max_depth, 1)
+				return parse_json_with_depth(a, max_depth, 0)
 			}
 			return parse_json_recursive(a)
 		}
@@ -1614,10 +1625,12 @@ fn fn_match(args []VrlValue) !VrlValue {
 		string { a1 }
 		else { return error('match second arg must be regex') }
 	}
-	// Use V's regex module for matching
-mut re := regex.regex_opt(pattern) or { return error('invalid regex: ${pattern}') }
-	start, _ := re.find(s)
-	return VrlValue(start >= 0)
+	// Use pcre for matching (supports (?i) and other flags)
+	re := pcre.compile(pattern) or { return error('invalid regex: ${pattern}') }
+	if _ := re.find(s) {
+		return VrlValue(true)
+	}
+	return VrlValue(false)
 }
 
 fn fn_match_any(args []VrlValue) !VrlValue {
@@ -1632,15 +1645,16 @@ fn fn_match_any(args []VrlValue) !VrlValue {
 		[]VrlValue { a1 }
 		else { return error('match_any second arg must be array') }
 	}
-for p in patterns {
+	for p in patterns {
 		pat := match p {
 			VrlRegex { p.pattern }
 			string { p }
 			else { continue }
 		}
-		mut re := regex.regex_opt(pat) or { continue }
-		start, _ := re.find(s)
-		if start >= 0 { return VrlValue(true) }
+		re := pcre.compile(pat) or { continue }
+		if _ := re.find(s) {
+			return VrlValue(true)
+		}
 	}
 	return VrlValue(false)
 }
