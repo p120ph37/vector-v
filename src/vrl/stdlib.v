@@ -2057,6 +2057,41 @@ fn (mut rt Runtime) restore_closure_params(saved map[string]VrlValue, params []s
 	}
 }
 
+// save_closure_scope saves the complete variable scope before entering a closure.
+// Returns the set of variable names that existed before the closure.
+fn (rt &Runtime) save_closure_scope() ([]string, map[string]bool) {
+	keys := rt.vars.keys()
+	mut defined := map[string]bool{}
+	for k, v in rt.defined_vars {
+		defined[k] = v
+	}
+	return keys, defined
+}
+
+// restore_closure_scope removes any variables that were added inside the closure
+// and restores the original values of variables that were modified.
+fn (mut rt Runtime) restore_closure_scope(pre_keys []string, pre_defined map[string]bool, saved_vals map[string]VrlValue) {
+	// Build set of pre-existing variable names
+	mut pre_set := map[string]bool{}
+	for k in pre_keys {
+		pre_set[k] = true
+	}
+	// Remove variables that didn't exist before the closure
+	current_keys := rt.vars.keys()
+	for k in current_keys {
+		if k !in pre_set {
+			rt.vars.delete(k)
+			rt.defined_vars.delete(k)
+		}
+	}
+	// Restore original values for pre-existing variables
+	for k, v in saved_vals {
+		rt.vars.set(k, v)
+	}
+	// Restore defined_vars
+	rt.defined_vars = pre_defined.clone()
+}
+
 fn (mut rt Runtime) fn_filter(expr FnCallExpr) !VrlValue {
 	if expr.args.len < 1 { return error('filter requires 1 argument') }
 	container := rt.eval(expr.args[0])!
@@ -2113,6 +2148,8 @@ fn (mut rt Runtime) fn_for_each(expr FnCallExpr) !VrlValue {
 	if expr.closure.len == 0 { return VrlValue(VrlNull{}) }
 	closure_expr := expr.closure[0]
 	if closure_expr is ClosureExpr {
+		// Save full variable scope — closure variables must not leak
+		pre_keys, pre_defined := rt.save_closure_scope()
 		saved := rt.save_closure_params(closure_expr.params)
 		c := container
 		match c {
@@ -2151,7 +2188,7 @@ fn (mut rt Runtime) fn_for_each(expr FnCallExpr) !VrlValue {
 			}
 			else {}
 		}
-		rt.restore_closure_params(saved, closure_expr.params)
+		rt.restore_closure_scope(pre_keys, pre_defined, saved)
 	}
 	return VrlValue(VrlNull{})
 }
@@ -2452,18 +2489,25 @@ fn parse_json_object(s string) !VrlValue {
 	parts := split_json_top_level(inner)
 	mut result := new_object_map()
 	for part in parts {
-		colon_idx := find_colon(part)
-		if colon_idx > 0 {
-			key_str := part[..colon_idx].trim_space()
-			val_str := part[colon_idx + 1..].trim_space()
-			mut key := key_str
-			if key_str.starts_with('"') && key_str.ends_with('"') {
-				kend := key_str.len - 1
-				key = key_str[1..kend]
-			}
-			val := parse_json_recursive(val_str)!
-			result.set(key, val)
+		trimmed_part := part.trim_space()
+		if trimmed_part.len == 0 {
+			continue
 		}
+		colon_idx := find_colon(part)
+		if colon_idx <= 0 {
+			return error('unable to parse json: key must be a string at line 1 column ${trimmed_part.len}')
+		}
+		key_str := part[..colon_idx].trim_space()
+		val_str := part[colon_idx + 1..].trim_space()
+		mut key := key_str
+		if key_str.starts_with('"') && key_str.ends_with('"') {
+			kend := key_str.len - 1
+			key = key_str[1..kend]
+		} else {
+			return error('unable to parse json: key must be a string at line 1 column 3')
+		}
+		val := parse_json_recursive(val_str)!
+		result.set(key, val)
 	}
 	return VrlValue(result)
 }

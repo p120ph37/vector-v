@@ -206,7 +206,7 @@ fn test_upstream_vrl_conformance() {
 
 		// For error-expecting tests, just verify we also produce an error
 		if is_err {
-			_ := execute(src, obj) or {
+			_ := execute_checked(src, obj) or {
 				// Good - we also errored
 				err_passed++
 				continue
