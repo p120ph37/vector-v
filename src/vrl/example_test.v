@@ -6,6 +6,7 @@ import os
 struct ExampleTest {
 	title  string
 	source string
+	input  string // optional input JSON object context
 	result string // expected result string
 	is_ok  bool   // true if result was Ok(...), false if Err(...)
 	file   string // source .rs file
@@ -51,6 +52,7 @@ fn parse_examples_from_rs(path string) []ExampleTest {
 		// Parse fields from block
 		title := extract_field(block, 'title')
 		source := extract_field(block, 'source')
+		input := extract_field(block, 'input')
 		result_str := extract_result_field(block)
 		is_ok := block.contains('result: Ok(')
 
@@ -58,6 +60,7 @@ fn parse_examples_from_rs(path string) []ExampleTest {
 			examples << ExampleTest{
 				title: title
 				source: source
+				input: input
 				result: result_str
 				is_ok: is_ok
 				file: fname
@@ -239,7 +242,24 @@ fn test_upstream_stdlib_examples() {
 				continue
 			}
 
-			actual := execute(ex.source, map[string]VrlValue{}) or {
+			// Build input object context if provided
+			mut input_obj := map[string]VrlValue{}
+			if ex.input.len > 0 {
+				parsed := parse_json_recursive(ex.input) or { VrlValue(new_object_map()) }
+				p := parsed
+				match p {
+					ObjectMap {
+						all_keys := p.keys()
+						for k in all_keys {
+							v := p.get(k) or { VrlValue(VrlNull{}) }
+							input_obj[k] = v
+						}
+					}
+					else {}
+				}
+			}
+
+			actual := execute(ex.source, input_obj) or {
 				em := err.msg()
 				if ex.result.contains(em) {
 					passed++
@@ -271,5 +291,5 @@ fn test_upstream_stdlib_examples() {
 		}
 	}
 	os.write_file('/tmp/vrl_example_results.txt', report.join('\n')) or {}
-	assert failed <= 8, 'VRL examples: ${failed} failures (max 8 allowed). See /tmp/vrl_example_results.txt'
+	assert failed <= 0, 'VRL examples: ${failed} failures (0 allowed). See /tmp/vrl_example_results.txt'
 }
