@@ -90,40 +90,32 @@ const uuid_v7_counter_bits = 42
 const uuid_v7_reseed_mask = u64(0x0000_01FF_FFFF_FFFF) // 41 bits (high bit of 42 clear)
 const uuid_v7_max_counter = u64(0x0000_03FF_FFFF_FFFF) // 42 bits all set
 
-// Monotonic counter state stored as C statics (avoids V's -enable-globals).
-#flag -I @VMODROOT/src/vrl
-#include "uuid_v7_state.h"
-
-fn C.uuid_v7_get_last_ms() i64
-fn C.uuid_v7_set_last_ms(ms i64)
-fn C.uuid_v7_get_counter() u64
-fn C.uuid_v7_set_counter(c u64)
+// Monotonic counter state.
+__global uuid_v7_last_ms = i64(0)
+__global uuid_v7_counter_val = u64(0)
 
 // uuid_v7_next_counter returns the next (counter, random32, effective_ms) tuple
 // for a given millisecond timestamp.  counter is 42 bits, random32 is 32 bits.
 fn uuid_v7_next_counter(ts_ms i64) (u64, u32, i64) {
 	random32 := u32(rand.intn(0x7FFF_FFFE) or { 0 }) ^ (u32(rand.intn(0x7FFF_FFFE) or { 0 }) << 15)
-	last_ms := C.uuid_v7_get_last_ms()
-	if ts_ms != last_ms {
+	if ts_ms != uuid_v7_last_ms {
 		// New millisecond — reseed counter with random 41-bit value
 		seed := u64(rand.intn(0x7FFF_FFFE) or { 0 }) | (u64(rand.intn(0x7FFF_FFFE) or { 0 }) << 31)
-		counter := seed & uuid_v7_reseed_mask
-		C.uuid_v7_set_counter(counter)
-		C.uuid_v7_set_last_ms(ts_ms)
-		return counter, random32, ts_ms
+		uuid_v7_counter_val = seed & uuid_v7_reseed_mask
+		uuid_v7_last_ms = ts_ms
+		return uuid_v7_counter_val, random32, ts_ms
 	}
 	// Same millisecond — increment
-	mut counter := C.uuid_v7_get_counter() + 1
+	uuid_v7_counter_val++
 	mut effective_ms := ts_ms
-	if counter > uuid_v7_max_counter {
+	if uuid_v7_counter_val > uuid_v7_max_counter {
 		// Overflow: advance timestamp by 1 ms and reseed
 		effective_ms = ts_ms + 1
-		C.uuid_v7_set_last_ms(effective_ms)
+		uuid_v7_last_ms = effective_ms
 		seed := u64(rand.intn(0x7FFF_FFFE) or { 0 }) | (u64(rand.intn(0x7FFF_FFFE) or { 0 }) << 31)
-		counter = seed & uuid_v7_reseed_mask
+		uuid_v7_counter_val = seed & uuid_v7_reseed_mask
 	}
-	C.uuid_v7_set_counter(counter)
-	return counter, random32, effective_ms
+	return uuid_v7_counter_val, random32, effective_ms
 }
 
 // uuid_v7() - time-ordered UUID with 42-bit monotonic counter
