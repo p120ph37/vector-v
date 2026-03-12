@@ -11,13 +11,10 @@ fn uses_unimplemented_fn(src string) bool {
 		'parse_aws_cloudwatch_log_subscription_message', 'parse_aws_vpc_flow_log',
 		'parse_cef', 'parse_user_agent', 'parse_etld',
 		'parse_ruby_hash', 'parse_glog', 'parse_grok', 'parse_groks',
-		'parse_influxdb', 'parse_yaml', 'parse_proto',
+		'parse_influxdb', 'parse_proto',
 		// Codec (require external libs)
 		'encode_punycode', 'decode_punycode',
 		'encode_snappy', 'decode_snappy',
-		'encode_zlib', 'decode_zlib',
-		'encode_gzip', 'decode_gzip',
-		'encode_zstd', 'decode_zstd',
 		'encode_proto', 'decode_proto',
 		'encode_charset', 'decode_charset',
 		// Other unimplemented

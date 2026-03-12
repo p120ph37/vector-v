@@ -1654,7 +1654,12 @@ fn fn_get_timezone_name(args []VrlValue) !VrlValue {
 	// Try reading /etc/timezone (Debian/Ubuntu)
 	tz_file := os.read_file('/etc/timezone') or { '' }
 	if tz_file.len > 0 {
-		return VrlValue(tz_file.trim_space())
+		tz_val := tz_file.trim_space()
+		// Normalize Etc/UTC and Etc/GMT to their short forms
+		if tz_val == 'Etc/UTC' || tz_val == 'Etc/GMT' {
+			return VrlValue('UTC')
+		}
+		return VrlValue(tz_val)
 	}
 	// Try reading /etc/localtime symlink target (RHEL/CentOS/Arch)
 	link_target := os.real_path('/etc/localtime')
@@ -2148,4 +2153,720 @@ fn fn_parse_logfmt(args []VrlValue) !VrlValue {
 		}
 	}
 	return VrlValue(result)
+}
+
+// parse_yaml(value) - Parse a YAML string into a VrlValue
+fn fn_parse_yaml(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('parse_yaml requires 1 argument')
+	}
+	a := args[0]
+	match a {
+		string { return yaml_parse(a) }
+		else { return error('parse_yaml requires a string argument') }
+	}
+}
+
+// yaml_parse is the entry point for YAML parsing
+fn yaml_parse(input string) !VrlValue {
+	lines := input.split('\n')
+	mut idx := 0
+	// skip leading blank lines and comments
+	for idx < lines.len {
+		trimmed := lines[idx].trim_space()
+		if trimmed.len == 0 || trimmed.starts_with('#') || trimmed == '---' {
+			idx++
+			continue
+		}
+		break
+	}
+	if idx >= lines.len {
+		return VrlValue(VrlNull{})
+	}
+	// Check if first non-blank line starts a flow value
+	first := lines[idx].trim_space()
+	if first.starts_with('{') || first.starts_with('[') {
+		// Join remaining lines and parse as flow
+		mut rest := []string{}
+		for i in idx .. lines.len {
+			rest << lines[i]
+		}
+		combined := rest.join('\n').trim_space()
+		if combined.starts_with('{') {
+			return yaml_parse_flow_mapping(combined)
+		}
+		return yaml_parse_flow_sequence(combined)
+	}
+	result, _ := yaml_parse_block(lines, idx, 0)!
+	return result
+}
+
+// yaml_parse_block parses a block of YAML lines at a given indent level.
+// Returns the parsed VrlValue and the next line index to process.
+fn yaml_parse_block(lines []string, start int, min_indent int) !(VrlValue, int) {
+	mut idx := start
+	// skip blanks and comments
+	for idx < lines.len {
+		t := lines[idx].trim_space()
+		if t.len == 0 || t.starts_with('#') {
+			idx++
+			continue
+		}
+		break
+	}
+	if idx >= lines.len {
+		return VrlValue(VrlNull{}), idx
+	}
+	line := lines[idx]
+	trimmed := line.trim_space()
+	indent := yaml_indent(line)
+
+	// sequence item
+	if trimmed.starts_with('- ') || trimmed == '-' {
+		return yaml_parse_sequence(lines, idx, indent)
+	}
+	// mapping (key: value)
+	if yaml_is_mapping_line(trimmed) {
+		return yaml_parse_mapping(lines, idx, indent)
+	}
+	// scalar
+	val := yaml_parse_scalar(trimmed)
+	return val, idx + 1
+}
+
+// yaml_parse_mapping parses a YAML mapping block
+fn yaml_parse_mapping(lines []string, start int, base_indent int) !(VrlValue, int) {
+	mut result := new_object_map()
+	mut idx := start
+	for idx < lines.len {
+		line := lines[idx]
+		trimmed := line.trim_space()
+		if trimmed.len == 0 || trimmed.starts_with('#') {
+			idx++
+			continue
+		}
+		indent := yaml_indent(line)
+		if indent < base_indent {
+			break
+		}
+		if indent > base_indent {
+			break
+		}
+		// handle sequence item containing a mapping
+		if trimmed.starts_with('- ') || trimmed == '-' {
+			break
+		}
+		if !yaml_is_mapping_line(trimmed) {
+			break
+		}
+		key, val_part := yaml_split_mapping(trimmed)
+		val_str := val_part.trim_space()
+
+		if val_str.len == 0 {
+			// Block value on next lines
+			mut next := idx + 1
+			// skip blank lines
+			for next < lines.len && lines[next].trim_space().len == 0 {
+				next++
+			}
+			if next < lines.len {
+				next_indent := yaml_indent(lines[next])
+				next_trimmed := lines[next].trim_space()
+				if next_indent > base_indent {
+					if next_trimmed.starts_with('- ') || next_trimmed == '-' {
+						val, after := yaml_parse_sequence(lines, next, next_indent)!
+						result.set(key, val)
+						idx = after
+						continue
+					} else if next_trimmed.starts_with('|') || next_trimmed.starts_with('>') {
+						val, after := yaml_parse_multiline_string(lines, next, base_indent)!
+						result.set(key, val)
+						idx = after
+						continue
+					} else {
+						val, after := yaml_parse_block(lines, next, next_indent)!
+						result.set(key, val)
+						idx = after
+						continue
+					}
+				} else if next_indent == base_indent
+					&& (next_trimmed.starts_with('- ') || next_trimmed == '-') {
+					// YAML allows sequence items at same indent as the mapping key
+					val, after := yaml_parse_sequence(lines, next, next_indent)!
+					result.set(key, val)
+					idx = after
+					continue
+				}
+			}
+			result.set(key, VrlValue(VrlNull{}))
+			idx = next
+			continue
+		}
+
+		// Check for multiline indicators
+		if val_str == '|' || val_str == '>' || val_str == '|-' || val_str == '>-'
+			|| val_str == '|+' || val_str == '>+' {
+			val, after := yaml_parse_multiline_string_from_indicator(lines, idx + 1, base_indent,
+				val_str)!
+			result.set(key, val)
+			idx = after
+			continue
+		}
+
+		// Inline flow
+		if val_str.starts_with('{') {
+			val := yaml_parse_flow_mapping(val_str)!
+			result.set(key, val)
+			idx++
+			continue
+		}
+		if val_str.starts_with('[') {
+			val := yaml_parse_flow_sequence(val_str)!
+			result.set(key, val)
+			idx++
+			continue
+		}
+		// Inline scalar
+		result.set(key, yaml_parse_scalar(val_str))
+		idx++
+	}
+	return VrlValue(result), idx
+}
+
+// yaml_parse_sequence parses a YAML sequence block
+fn yaml_parse_sequence(lines []string, start int, base_indent int) !(VrlValue, int) {
+	mut result := []VrlValue{}
+	mut idx := start
+	for idx < lines.len {
+		line := lines[idx]
+		trimmed := line.trim_space()
+		if trimmed.len == 0 || trimmed.starts_with('#') {
+			idx++
+			continue
+		}
+		indent := yaml_indent(line)
+		if indent < base_indent {
+			break
+		}
+		if indent > base_indent {
+			break
+		}
+		if !trimmed.starts_with('- ') && trimmed != '-' {
+			break
+		}
+		item_str := if trimmed == '-' { '' } else { trimmed[2..] }
+		item_trimmed := item_str.trim_space()
+
+		if item_trimmed.len == 0 {
+			// Block value after bare dash
+			mut next := idx + 1
+			for next < lines.len && lines[next].trim_space().len == 0 {
+				next++
+			}
+			if next < lines.len {
+				next_indent := yaml_indent(lines[next])
+				if next_indent > base_indent {
+					val, after := yaml_parse_block(lines, next, next_indent)!
+					result << val
+					idx = after
+					continue
+				}
+			}
+			result << VrlValue(VrlNull{})
+			idx++
+			continue
+		}
+
+		// Check if item is itself a mapping
+		if yaml_is_mapping_line(item_trimmed) {
+			// Inline mapping starting on the same line as dash
+			item_indent := base_indent + 2
+			mut sub_lines := []string{}
+			spaces := ' '.repeat(item_indent)
+			sub_lines << '${spaces}${item_trimmed}'
+			mut next := idx + 1
+			for next < lines.len {
+				nl := lines[next]
+				nt := nl.trim_space()
+				if nt.len == 0 || nt.starts_with('#') {
+					sub_lines << nl
+					next++
+					continue
+				}
+				ni := yaml_indent(nl)
+				if ni > base_indent {
+					sub_lines << nl
+					next++
+					continue
+				}
+				break
+			}
+			val, _ := yaml_parse_mapping(sub_lines, 0, item_indent)!
+			result << val
+			idx = next
+			continue
+		}
+
+		if item_trimmed.starts_with('- ') || item_trimmed == '-' {
+			// Nested sequence
+			item_indent := base_indent + 2
+			mut sub_lines := []string{}
+			spaces := ' '.repeat(item_indent)
+			sub_lines << '${spaces}${item_trimmed}'
+			mut next := idx + 1
+			for next < lines.len {
+				nl := lines[next]
+				nt := nl.trim_space()
+				if nt.len == 0 || nt.starts_with('#') {
+					sub_lines << nl
+					next++
+					continue
+				}
+				ni := yaml_indent(nl)
+				if ni > base_indent {
+					sub_lines << nl
+					next++
+					continue
+				}
+				break
+			}
+			val, _ := yaml_parse_sequence(sub_lines, 0, item_indent)!
+			result << val
+			idx = next
+			continue
+		}
+
+		if item_trimmed.starts_with('{') {
+			val := yaml_parse_flow_mapping(item_trimmed)!
+			result << val
+			idx++
+			continue
+		}
+		if item_trimmed.starts_with('[') {
+			val := yaml_parse_flow_sequence(item_trimmed)!
+			result << val
+			idx++
+			continue
+		}
+
+		// Plain scalar
+		result << yaml_parse_scalar(item_trimmed)
+		idx++
+	}
+	return VrlValue(result), idx
+}
+
+// yaml_parse_multiline_string handles | and > indicators on the value side of a mapping
+fn yaml_parse_multiline_string(lines []string, indicator_line int, base_indent int) !(VrlValue, int) {
+	indicator := lines[indicator_line].trim_space()
+	return yaml_parse_multiline_string_from_indicator(lines, indicator_line + 1, base_indent,
+		indicator)
+}
+
+fn yaml_parse_multiline_string_from_indicator(lines []string, start int, base_indent int, indicator string) !(VrlValue, int) {
+	is_literal := indicator.starts_with('|') // literal block (preserve newlines)
+	chomp := if indicator.ends_with('-') {
+		'strip'
+	} else if indicator.ends_with('+') {
+		'keep'
+	} else {
+		'clip'
+	}
+
+	mut idx := start
+	// Determine content indent from first non-empty content line
+	mut content_indent := -1
+	mut content_lines := []string{}
+
+	for idx < lines.len {
+		line := lines[idx]
+		if line.trim_space().len == 0 {
+			content_lines << ''
+			idx++
+			continue
+		}
+		ind := yaml_indent(line)
+		if ind <= base_indent {
+			break
+		}
+		if content_indent < 0 {
+			content_indent = ind
+		}
+		if ind >= content_indent {
+			content_lines << line[content_indent..]
+		} else {
+			break
+		}
+		idx++
+	}
+
+	// Remove trailing empty lines for strip/clip
+	if chomp == 'strip' || chomp == 'clip' {
+		for content_lines.len > 0 && content_lines.last().trim_space().len == 0 {
+			content_lines.pop()
+		}
+	}
+
+	mut result_str := ''
+	if is_literal {
+		result_str = content_lines.join('\n')
+	} else {
+		// Folded: replace single newlines with spaces, preserve double newlines
+		mut parts := []string{}
+		mut current := ''
+		for cl in content_lines {
+			if cl.trim_space().len == 0 {
+				if current.len > 0 {
+					parts << current
+					current = ''
+				}
+				parts << ''
+			} else {
+				if current.len > 0 {
+					current += ' ' + cl
+				} else {
+					current = cl
+				}
+			}
+		}
+		if current.len > 0 {
+			parts << current
+		}
+		result_str = parts.join('\n')
+	}
+
+	if chomp == 'clip' && result_str.len > 0 {
+		result_str += '\n'
+	} else if chomp == 'keep' {
+		result_str += '\n'
+	}
+
+	return VrlValue(result_str), idx
+}
+
+// yaml_parse_flow_mapping parses {key: val, key2: val2}
+fn yaml_parse_flow_mapping(s string) !VrlValue {
+	trimmed := s.trim_space()
+	if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+		return error('invalid YAML flow mapping')
+	}
+	inner := trimmed[1..trimmed.len - 1].trim_space()
+	if inner.len == 0 {
+		return VrlValue(new_object_map())
+	}
+	mut result := new_object_map()
+	parts := yaml_split_flow(inner)
+	for part in parts {
+		p := part.trim_space()
+		if p.len == 0 {
+			continue
+		}
+		colon := yaml_find_colon(p)
+		if colon < 0 {
+			return error('invalid YAML flow mapping entry: ${p}')
+		}
+		key := yaml_unquote(p[..colon].trim_space())
+		val_str := p[colon + 1..].trim_space()
+		if val_str.starts_with('{') {
+			val := yaml_parse_flow_mapping(val_str)!
+			result.set(key, val)
+		} else if val_str.starts_with('[') {
+			val := yaml_parse_flow_sequence(val_str)!
+			result.set(key, val)
+		} else {
+			result.set(key, yaml_parse_scalar(val_str))
+		}
+	}
+	return VrlValue(result)
+}
+
+// yaml_parse_flow_sequence parses [a, b, c]
+fn yaml_parse_flow_sequence(s string) !VrlValue {
+	trimmed := s.trim_space()
+	if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
+		return error('invalid YAML flow sequence')
+	}
+	inner := trimmed[1..trimmed.len - 1].trim_space()
+	if inner.len == 0 {
+		return VrlValue([]VrlValue{})
+	}
+	mut result := []VrlValue{}
+	parts := yaml_split_flow(inner)
+	for part in parts {
+		p := part.trim_space()
+		if p.len == 0 {
+			continue
+		}
+		if p.starts_with('{') {
+			val := yaml_parse_flow_mapping(p)!
+			result << val
+		} else if p.starts_with('[') {
+			val := yaml_parse_flow_sequence(p)!
+			result << val
+		} else {
+			result << yaml_parse_scalar(p)
+		}
+	}
+	return VrlValue(result)
+}
+
+// yaml_split_flow splits a flow collection by commas, respecting nesting
+fn yaml_split_flow(s string) []string {
+	mut parts := []string{}
+	mut depth_brace := 0
+	mut depth_bracket := 0
+	mut start := 0
+	mut in_single_quote := false
+	mut in_double_quote := false
+
+	for i := 0; i < s.len; i++ {
+		ch := s[i]
+		if ch == `'` && !in_double_quote {
+			in_single_quote = !in_single_quote
+			continue
+		}
+		if ch == `"` && !in_single_quote {
+			in_double_quote = !in_double_quote
+			continue
+		}
+		if in_single_quote || in_double_quote {
+			continue
+		}
+		if ch == `{` {
+			depth_brace++
+		} else if ch == `}` {
+			depth_brace--
+		} else if ch == `[` {
+			depth_bracket++
+		} else if ch == `]` {
+			depth_bracket--
+		} else if ch == `,` && depth_brace == 0 && depth_bracket == 0 {
+			parts << s[start..i]
+			start = i + 1
+		}
+	}
+	if start < s.len {
+		parts << s[start..]
+	}
+	return parts
+}
+
+// yaml_parse_scalar converts a YAML scalar string to a VrlValue
+fn yaml_parse_scalar(s string) VrlValue {
+	trimmed := s.trim_space()
+	if trimmed.len == 0 {
+		return VrlValue(VrlNull{})
+	}
+
+	// Strip inline comments (only if not in a quoted string)
+	val := yaml_strip_comment(trimmed)
+
+	// Null
+	if val == 'null' || val == '~' || val == 'Null' || val == 'NULL' {
+		return VrlValue(VrlNull{})
+	}
+	// Boolean
+	if val == 'true' || val == 'True' || val == 'TRUE' || val == 'yes' || val == 'Yes'
+		|| val == 'YES' || val == 'on' || val == 'On' || val == 'ON' {
+		return VrlValue(true)
+	}
+	if val == 'false' || val == 'False' || val == 'FALSE' || val == 'no' || val == 'No'
+		|| val == 'NO' || val == 'off' || val == 'Off' || val == 'OFF' {
+		return VrlValue(false)
+	}
+	// Quoted strings
+	if (val.starts_with('"') && val.ends_with('"')) || (val.starts_with("'") && val.ends_with("'")) {
+		return VrlValue(yaml_unquote(val))
+	}
+	// Integer
+	if yaml_is_integer(val) {
+		return VrlValue(val.i64())
+	}
+	// Float
+	if yaml_is_float(val) {
+		if val == '.inf' || val == '.Inf' || val == '.INF' {
+			return VrlValue(f64(math.inf(1)))
+		}
+		if val == '-.inf' || val == '-.Inf' || val == '-.INF' {
+			return VrlValue(f64(math.inf(-1)))
+		}
+		if val == '.nan' || val == '.NaN' || val == '.NAN' {
+			return VrlValue(f64(math.nan()))
+		}
+		return VrlValue(val.f64())
+	}
+	// Plain string
+	return VrlValue(val)
+}
+
+fn yaml_strip_comment(s string) string {
+	// Don't strip from quoted strings
+	if s.starts_with('"') || s.starts_with("'") {
+		return s
+	}
+	mut i := 0
+	for i < s.len {
+		if s[i] == `#` && i > 0 && s[i - 1] == ` ` {
+			return s[..i].trim_right(' \t')
+		}
+		i++
+	}
+	return s
+}
+
+fn yaml_is_integer(s string) bool {
+	if s.len == 0 {
+		return false
+	}
+	start := if s[0] == `-` || s[0] == `+` { 1 } else { 0 }
+	if start >= s.len {
+		return false
+	}
+	// Octal 0o prefix
+	if s.len > start + 1 && s[start] == `0` && (s[start + 1] == `o` || s[start + 1] == `O`) {
+		return true
+	}
+	// Hex 0x prefix
+	if s.len > start + 1 && s[start] == `0` && (s[start + 1] == `x` || s[start + 1] == `X`) {
+		return true
+	}
+	for i in start .. s.len {
+		if s[i] == `_` {
+			continue
+		}
+		if !s[i].is_digit() {
+			return false
+		}
+	}
+	return true
+}
+
+fn yaml_is_float(s string) bool {
+	if s == '.inf' || s == '.Inf' || s == '.INF' || s == '-.inf' || s == '-.Inf'
+		|| s == '-.INF' || s == '.nan' || s == '.NaN' || s == '.NAN' {
+		return true
+	}
+	if s.len == 0 {
+		return false
+	}
+	mut has_dot := false
+	mut has_e := false
+	start := if s[0] == `-` || s[0] == `+` { 1 } else { 0 }
+	if start >= s.len {
+		return false
+	}
+	for i in start .. s.len {
+		ch := s[i]
+		if ch == `.` {
+			if has_dot {
+				return false
+			}
+			has_dot = true
+		} else if ch == `e` || ch == `E` {
+			if has_e {
+				return false
+			}
+			has_e = true
+		} else if ch == `+` || ch == `-` {
+			if i == 0 || (s[i - 1] != `e` && s[i - 1] != `E`) {
+				return false
+			}
+		} else if ch == `_` {
+			continue
+		} else if !ch.is_digit() {
+			return false
+		}
+	}
+	return has_dot || has_e
+}
+
+fn yaml_indent(line string) int {
+	mut count := 0
+	for c in line {
+		if c == ` ` {
+			count++
+		} else {
+			break
+		}
+	}
+	return count
+}
+
+fn yaml_is_mapping_line(trimmed string) bool {
+	if trimmed.len == 0 {
+		return false
+	}
+	// Skip quoted keys
+	if trimmed[0] == `"` {
+		end := trimmed.index_after_('"', 1)
+		if end > 0 && end + 1 < trimmed.len && trimmed[end + 1] == `:` {
+			return true
+		}
+		return false
+	}
+	if trimmed[0] == `'` {
+		end := trimmed.index_after_("'", 1)
+		if end > 0 && end + 1 < trimmed.len && trimmed[end + 1] == `:` {
+			return true
+		}
+		return false
+	}
+	// Find colon not inside quotes
+	colon := yaml_find_colon(trimmed)
+	if colon < 0 {
+		return false
+	}
+	// Key: value requires colon followed by space or end of string
+	if colon + 1 >= trimmed.len {
+		return true
+	}
+	return trimmed[colon + 1] == ` ` || trimmed[colon + 1] == `\t`
+}
+
+fn yaml_find_colon(s string) int {
+	mut in_single := false
+	mut in_double := false
+	for i := 0; i < s.len; i++ {
+		ch := s[i]
+		if ch == `'` && !in_double {
+			in_single = !in_single
+		} else if ch == `"` && !in_single {
+			in_double = !in_double
+		} else if ch == `:` && !in_single && !in_double {
+			// Must be followed by space, tab, or end-of-string for block style
+			if i + 1 >= s.len || s[i + 1] == ` ` || s[i + 1] == `\t` {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+fn yaml_split_mapping(trimmed string) (string, string) {
+	colon := yaml_find_colon(trimmed)
+	if colon < 0 {
+		return trimmed, ''
+	}
+	raw_key := trimmed[..colon].trim_space()
+	key := yaml_unquote(raw_key)
+	val := if colon + 1 < trimmed.len { trimmed[colon + 1..] } else { '' }
+	return key, val
+}
+
+fn yaml_unquote(s string) string {
+	if s.len < 2 {
+		return s
+	}
+	if s[0] == `"` && s[s.len - 1] == `"` {
+		inner := s[1..s.len - 1]
+		// Handle escape sequences
+		return inner.replace('\\n', '\n').replace('\\t', '\t').replace('\\"', '"').replace('\\\\',
+			'\\')
+	}
+	if s[0] == `'` && s[s.len - 1] == `'` {
+		inner := s[1..s.len - 1]
+		// Single-quoted strings only escape '' -> '
+		return inner.replace("''", "'")
+	}
+	return s
 }

@@ -556,7 +556,11 @@ fn (mut rt Runtime) fn_replace_with(expr FnCallExpr) !VrlValue {
 	}
 	closure_expr := expr.closure[0]
 	if closure_expr is ClosureExpr {
-		// Validate capture group names
+		// Validate capture group names - "string" and "captures" are reserved
+		if pattern.contains('(?P<string>') || pattern.contains('(?P<captures>') {
+			return error('function call error for "replace_with": Capture group cannot be named "string" or "captures"')
+		}
+
 		re := pcre.compile(normalize_regex_pattern(pattern)) or {
 			return error('invalid regex: ${pattern}')
 		}

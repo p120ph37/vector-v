@@ -35,11 +35,14 @@ module vrl
 // Rust's BTreeMap stores small collections in a single sorted node.
 pub struct Runtime {
 mut:
-	object     ObjectMap  // The root object (.) when it's an object
-	root_array []VrlValue // The root value when . was assigned a non-object value
-	has_root_array bool   // True if root was assigned a non-object value
+	object         ObjectMap  // The root object (.) when it's an object
+	root_array     []VrlValue // The root value when . was assigned an array
+	has_root_array bool       // True if root was assigned an array
+	root_scalar    VrlValue   // The root value when . was assigned a scalar
+	has_root_scalar bool      // True if root was assigned a scalar (non-object, non-array)
 	metadata   ObjectMap  // Metadata (%)
 	vars       ObjectMap  // Local variables
+	defined_vars map[string]bool // Track which variables have been defined
 	aborted    bool
 	returned   bool
 	abort_msg  string
@@ -116,6 +119,10 @@ pub fn (mut rt Runtime) eval(expr Expr) !VrlValue {
 		IdentExpr {
 			if val := rt.vars.get(expr.name) {
 				return val
+			}
+			// If the variable was never assigned, it's undefined
+			if expr.name !in rt.defined_vars {
+				return error('undefined variable: ${expr.name}')
 			}
 			return VrlValue(VrlNull{})
 		}
@@ -443,10 +450,17 @@ fn split_path_segments(clean string) []string {
 // Path access — avoids full object copy for simple lookups.
 fn (rt &Runtime) get_path(path string) !VrlValue {
 	if path == '.' {
+		if rt.has_root_scalar {
+			return rt.root_scalar
+		}
 		if rt.has_root_array {
 			return VrlValue(rt.root_array.clone())
 		}
 		return VrlValue(rt.object.clone_map())
+	}
+	// If root is a scalar or array, field access returns null
+	if rt.has_root_scalar || rt.has_root_array {
+		return VrlValue(VrlNull{})
 	}
 	clean := if path.starts_with('.') { path[1..] } else { path }
 
@@ -514,15 +528,24 @@ fn (mut rt Runtime) assign_to(target Expr, val VrlValue) {
 					ObjectMap {
 						rt.object = v.clone_map()
 						rt.has_root_array = false
+						rt.has_root_scalar = false
 					}
 					[]VrlValue {
 						rt.root_array = v.clone()
 						rt.has_root_array = true
+						rt.has_root_scalar = false
 					}
-					else {}
+					else {
+						rt.root_scalar = val
+						rt.has_root_scalar = true
+						rt.has_root_array = false
+					}
 				}
 				return
 			}
+			// Setting a field path resets scalar/array root
+			rt.has_root_scalar = false
+			rt.has_root_array = false
 			clean := if target.path.starts_with('.') { target.path[1..] } else { target.path }
 			// Fast path: single segment (no dot, no quotes) — most common case
 			if !clean.contains('.') && !clean.contains('"') && !clean.contains('[') {
@@ -534,6 +557,7 @@ fn (mut rt Runtime) assign_to(target Expr, val VrlValue) {
 		}
 		IdentExpr {
 			rt.vars.set(target.name, val)
+			rt.defined_vars[target.name] = true
 		}
 		MetaPathExpr {
 			if target.path == '%' {
@@ -632,6 +656,13 @@ fn (rt &Runtime) overlay_path_types(base ObjectMap) ObjectMap {
 		}
 	}
 
+	// Only add object inner if there are actual overlaid fields or base already had object
+	has_overlaid := inner.len() > 0
+	had_object := if _ := base.get('object') { true } else { false }
+	if !has_overlaid && !had_object {
+		return base
+	}
+
 	// Build result with updated object inner
 	mut result := new_object_map()
 	for rk in base.keys() {
@@ -641,8 +672,10 @@ fn (rt &Runtime) overlay_path_types(base ObjectMap) ObjectMap {
 		rval := base.get(rk) or { continue }
 		result.set(rk, rval)
 	}
-	obj_val := VrlValue(inner)
-	result.set('object', obj_val)
+	if has_overlaid || had_object {
+		obj_val := VrlValue(inner)
+		result.set('object', obj_val)
+	}
 	return result
 }
 

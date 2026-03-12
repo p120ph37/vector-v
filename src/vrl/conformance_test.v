@@ -4,11 +4,12 @@ import os
 
 fn is_json_balanced(s string) bool {
 	mut depth := 0
+	mut has_bracket := false
 	for c in s {
-		if c == `{` || c == `[` { depth++ }
+		if c == `{` || c == `[` { depth++; has_bracket = true }
 		if c == `}` || c == `]` { depth-- }
 	}
-	return depth == 0
+	return has_bracket && depth == 0
 }
 
 fn parse_test_file(path string) (string, string, string, string, bool, bool) {
@@ -252,7 +253,6 @@ fn test_upstream_vrl_conformance() {
 		for e in errs { report << e }
 	}
 	os.write_file('/tmp/vrl_conformance_results.txt', report.join('\n')) or {}
-	// Remaining failures: type_def edge cases (3), query/parsing issues (5),
-	// error messages (2), new stdlib edge cases (4). Allow up to 14 failures.
-	assert failed <= 7, 'VRL conformance: ${failed} failures (max 7 allowed). See /tmp/vrl_conformance_results.txt'
+	// Remaining failures: type_def static analysis (2), error message format (1).
+	assert failed <= 3, 'VRL conformance: ${failed} failures (max 3 allowed). See /tmp/vrl_conformance_results.txt'
 }

@@ -539,6 +539,10 @@ fn (mut p Parser) parse_ident_or_call() !Expr {
 	}
 
 	if p.current().kind == .assign {
+		// Check for reserved keyword as assignment target
+		if name in ['array', 'object', 'string', 'integer', 'float', 'boolean', 'null', 'regex', 'timestamp'] {
+			return error('reserved keyword: ${name}')
+		}
 		p.advance()
 		p.skip_newlines()
 		val := p.parse_expr()!

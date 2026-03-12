@@ -51,8 +51,12 @@ pub fn new_object_map() ObjectMap {
 // Chooses flat or hash map mode based on size.
 pub fn object_map_from_map(m map[string]VrlValue) ObjectMap {
 	if m.len > object_map_threshold {
+		mut new_hm := map[string]VrlValue{}
+		for k, v in m {
+			new_hm[k] = deep_clone_value(v)
+		}
 		return ObjectMap{
-			hm: m.clone()
+			hm: new_hm
 			is_large: true
 		}
 	}
@@ -62,7 +66,7 @@ pub fn object_map_from_map(m map[string]VrlValue) ObjectMap {
 	}
 	for k, v in m {
 		om.ks << k
-		om.vs << v
+		om.vs << deep_clone_value(v)
 	}
 	return om
 }
@@ -178,17 +182,46 @@ pub fn (mut om ObjectMap) clear() {
 	om.is_large = false
 }
 
-// clone_map creates a deep copy of this ObjectMap.
+// clone_map creates a deep copy of this ObjectMap, recursively cloning all nested values.
 pub fn (om &ObjectMap) clone_map() ObjectMap {
 	if om.is_large {
+		mut new_hm := map[string]VrlValue{}
+		for k, v in om.hm {
+			new_hm[k] = deep_clone_value(v)
+		}
 		return ObjectMap{
-			hm: om.hm.clone()
+			hm: new_hm
 			is_large: true
 		}
 	}
+	mut new_vs := []VrlValue{cap: om.vs.len}
+	for v in om.vs {
+		new_vs << deep_clone_value(v)
+	}
 	return ObjectMap{
 		ks: om.ks.clone()
-		vs: om.vs.clone()
+		vs: new_vs
+	}
+}
+
+// deep_clone_value creates a deep copy of a VrlValue, recursively cloning nested structures.
+pub fn deep_clone_value(v VrlValue) VrlValue {
+	val := v
+	match val {
+		ObjectMap {
+			return VrlValue(val.clone_map())
+		}
+		[]VrlValue {
+			mut new_arr := []VrlValue{cap: val.len}
+			for item in val {
+				new_arr << deep_clone_value(item)
+			}
+			return VrlValue(new_arr)
+		}
+		else {
+			// Scalar types (string, i64, f64, bool, VrlNull, Timestamp, VrlRegex) are value types
+			return v
+		}
 	}
 }
 
