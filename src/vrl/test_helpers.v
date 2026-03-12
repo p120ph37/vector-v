@@ -6,8 +6,7 @@ fn uses_unimplemented_fn(src string) bool {
 		// Crypto (not available in V stdlib)
 		'sha3', 'seahash', 'xxhash',
 		// Complex parsing (require specialized formats)
-		'parse_common_log', 'parse_syslog', 'parse_logfmt', 'parse_xml',
-		'parse_klog', 'parse_linux_authorization',
+		'parse_xml',
 		'parse_nginx_log', 'parse_apache_log', 'parse_aws_alb_log',
 		'parse_aws_cloudwatch_log_subscription_message', 'parse_aws_vpc_flow_log',
 		'parse_cef', 'parse_user_agent', 'parse_etld',
@@ -21,15 +20,14 @@ fn uses_unimplemented_fn(src string) bool {
 		'encode_zstd', 'decode_zstd',
 		'encode_proto', 'decode_proto',
 		'encode_charset', 'decode_charset',
-		'decode_mime_q',
 		// Other unimplemented
 		'match_datadog_query',
 		'redact', 'community_id', 'decrypt', 'encrypt',
-		'crc32', 'murmur3', 'crc',
+		'murmur3', 'crc',
 		'mezmo_patterns', 'punycode',
 		'reverse_dns',
 		'decrypt_ip', 'encrypt_ip',
-		'get_timezone_name', 'haversine', 'http_request',
+		'http_request',
 		'uuid_from_friendly_id',
 	]
 	for fn_name in unimplemented {

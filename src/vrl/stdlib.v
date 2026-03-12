@@ -397,6 +397,11 @@ fn (mut rt Runtime) eval_fn_call_named(name string, expr FnCallExpr) !VrlValue {
 		'uuid_v7' {
 			return fn_uuid_v7(pos)
 		}
+		'haversine' {
+			if pos.len < 4 { return error('haversine requires 4 arguments') }
+			unit := VrlValue(get_named_string(named, 'measurement_unit', 'kilometers'))
+			return fn_haversine([pos[0], pos[1], pos[2], pos[3], unit])
+		}
 		else {
 			// Fallback: pass all positional args to the general dispatch
 			mut all_args := pos.clone()
@@ -482,12 +487,14 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'encode_csv' { return fn_encode_csv(args) }
 		'encode_key_value' { return fn_encode_key_value(args) }
 		'encode_logfmt' { return fn_encode_logfmt(args) }
+		'decode_mime_q' { return fn_decode_mime_q(args) }
 		// Crypto
 		'sha1' { return fn_sha1(args) }
 		'sha2' { return fn_sha2(args) }
 		'sha3' { return fn_sha3(args) }
 		'md5' { return fn_md5(args) }
 		'hmac' { return fn_hmac(args) }
+		'crc32' { return fn_crc32(args) }
 		// String
 		'camelcase' { return fn_camelcase(args) }
 		'pascalcase' { return fn_pascalcase(args) }
@@ -504,10 +511,15 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'parse_regex' { return fn_parse_regex(args) }
 		'parse_regex_all' { return fn_parse_regex_all(args) }
 		'parse_key_value' { return fn_parse_key_value(args) }
+		'parse_logfmt' { return fn_parse_logfmt(args) }
+		'parse_klog' { return fn_parse_klog(args) }
+		'parse_linux_authorization' { return fn_parse_linux_authorization(args) }
 		'parse_csv' { return fn_parse_csv(args) }
 		'parse_url' { return fn_parse_url(args) }
 		'parse_query_string' { return fn_parse_query_string(args) }
 		'parse_tokens' { return fn_parse_tokens(args) }
+		'parse_common_log' { return fn_parse_common_log(args) }
+		'parse_syslog' { return fn_parse_syslog(args) }
 		'parse_duration' { return fn_parse_duration(args) }
 		'parse_bytes' { return fn_parse_bytes(args) }
 		'parse_int' { return fn_parse_int(args) }
@@ -555,6 +567,8 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'random_bytes' { return fn_random_bytes(args) }
 		'uuid_v7' { return fn_uuid_v7(args) }
 		'get_hostname' { return fn_get_hostname() }
+		'get_timezone_name' { return fn_get_timezone_name(args) }
+		'haversine' { return fn_haversine(args) }
 		else { return error('unknown function: ${name}') }
 	}
 }
@@ -586,6 +600,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 	if name == 'map_keys' { return rt.fn_map_keys(expr) }
 	if name == 'map_values' { return rt.fn_map_values(expr) }
 	if name == 'replace_with' { return rt.fn_replace_with(expr) }
+	if name == 'unnest' { return rt.fn_unnest_special(expr) }
 
 	// If any args are named, use named-arg dispatch
 	has_named := expr.arg_names.len > 0 && expr.arg_names.any(it.len > 0)
@@ -662,13 +677,21 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'decode_percent' { return fn_decode_percent([a0]) }
 			'encode_logfmt' { return fn_encode_logfmt([a0]) }
 			'encode_csv' { return fn_encode_csv([a0]) }
+			'decode_mime_q' { return fn_decode_mime_q([a0]) }
 			'sha1' { return fn_sha1([a0]) }
 			'md5' { return fn_md5([a0]) }
+			'crc32' { return fn_crc32([a0]) }
 			'parse_float' { return fn_parse_float([a0]) }
 			'tag_types_externally' { return fn_tag_types_externally([a0]) }
 			'tally' { return fn_tally([a0]) }
 			'tally_value' { return fn_tally_value([a0]) }
 			'parse_tokens' { return fn_parse_tokens([a0]) }
+			'parse_common_log' { return fn_parse_common_log([a0]) }
+			'parse_syslog' { return fn_parse_syslog([a0]) }
+			'parse_logfmt' { return fn_parse_logfmt([a0]) }
+			'parse_klog' { return fn_parse_klog([a0]) }
+			'parse_linux_authorization' { return fn_parse_linux_authorization([a0]) }
+			'get_timezone_name' { return fn_get_timezone_name([a0]) }
 			'parse_url' { return fn_parse_url([a0]) }
 			'parse_query_string' { return fn_parse_query_string([a0]) }
 			'parse_bytes' { return fn_parse_bytes([a0]) }
@@ -783,12 +806,14 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		'encode_csv' { return fn_encode_csv(args) }
 		'encode_key_value' { return fn_encode_key_value(args) }
 		'encode_logfmt' { return fn_encode_logfmt(args) }
+		'decode_mime_q' { return fn_decode_mime_q(args) }
 		// Crypto
 		'sha1' { return fn_sha1(args) }
 		'sha2' { return fn_sha2(args) }
 		'sha3' { return fn_sha3(args) }
 		'md5' { return fn_md5(args) }
 		'hmac' { return fn_hmac(args) }
+		'crc32' { return fn_crc32(args) }
 		// String
 		'camelcase' { return fn_camelcase(args) }
 		'pascalcase' { return fn_pascalcase(args) }
@@ -805,10 +830,15 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		'parse_regex' { return fn_parse_regex(args) }
 		'parse_regex_all' { return fn_parse_regex_all(args) }
 		'parse_key_value' { return fn_parse_key_value(args) }
+		'parse_logfmt' { return fn_parse_logfmt(args) }
+		'parse_klog' { return fn_parse_klog(args) }
+		'parse_linux_authorization' { return fn_parse_linux_authorization(args) }
 		'parse_csv' { return fn_parse_csv(args) }
 		'parse_url' { return fn_parse_url(args) }
 		'parse_query_string' { return fn_parse_query_string(args) }
 		'parse_tokens' { return fn_parse_tokens(args) }
+		'parse_common_log' { return fn_parse_common_log(args) }
+		'parse_syslog' { return fn_parse_syslog(args) }
 		'parse_duration' { return fn_parse_duration(args) }
 		'parse_bytes' { return fn_parse_bytes(args) }
 		'parse_int' { return fn_parse_int(args) }
@@ -856,6 +886,8 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		'random_bytes' { return fn_random_bytes(args) }
 		'uuid_v7' { return fn_uuid_v7(args) }
 		'get_hostname' { return fn_get_hostname() }
+		'get_timezone_name' { return fn_get_timezone_name(args) }
+		'haversine' { return fn_haversine(args) }
 		else { return error('unknown function: ${name}') }
 	}
 }
@@ -913,10 +945,10 @@ fn fn_contains(args []VrlValue) !VrlValue {
 					}
 					return VrlValue(a.to_lower().contains(b.to_lower()))
 				}
-				else { return error('contains second arg must be string') }
+				else { return error('invalid argument type') }
 			}
 		}
-		else { return error('contains first arg must be string') }
+		else { return error('invalid argument type') }
 	}
 }
 

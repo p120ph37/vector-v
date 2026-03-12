@@ -5,6 +5,7 @@ import crypto.sha1
 import crypto.sha256
 import crypto.sha512
 import crypto.hmac
+import hash.crc32
 
 // sha1(value)
 fn fn_sha1(args []VrlValue) !VrlValue {
@@ -148,4 +149,18 @@ fn fn_hmac(args []VrlValue) !VrlValue {
 	}
 	// Return raw bytes as a string (callers use encode_base64/encode_base16)
 	return VrlValue(raw_bytes.bytestr())
+}
+
+// crc32(value) - Compute CRC32 checksum using IEEE polynomial
+fn fn_crc32(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('crc32 requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('crc32 requires a string') }
+	}
+	checksum := crc32.sum(s.bytes())
+	return VrlValue(i64(checksum))
 }

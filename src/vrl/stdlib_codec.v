@@ -397,3 +397,175 @@ fn logfmt_encode_value(v VrlValue) string {
 		}
 	}
 }
+
+// decode_mime_q(value) - Decode MIME Q-encoding (RFC 2047)
+// Format: =?charset?encoding?encoded_text?= (delimited form)
+// Also supports: ?encoding?encoded_text (internal form, without charset or delimiters)
+// Supports Q encoding (quoted-printable variant) and B encoding (base64).
+fn fn_decode_mime_q(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('decode_mime_q requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('decode_mime_q requires a string') }
+	}
+	// First, try to find delimited encoded words (=?charset?encoding?text?=)
+	mut result := []u8{}
+	mut i := 0
+	mut found_delimited := false
+	for i < s.len {
+		// Look for =? start of encoded word
+		if i + 1 < s.len && s[i] == `=` && s[i + 1] == `?` {
+			if decoded_word := decode_mime_q_delimited(s, i) {
+				for c in decoded_word.text {
+					result << c
+				}
+				i = decoded_word.end_pos
+				found_delimited = true
+				continue
+			}
+		}
+		result << s[i]
+		i++
+	}
+	if found_delimited {
+		return VrlValue(result.bytestr())
+	}
+	// If no delimited words found, try parsing as internal format: ?encoding?text
+	if decoded := decode_mime_q_internal(s) {
+		return VrlValue(decoded)
+	}
+	return error('unable to decode MIME Q-encoded string: ${s}')
+}
+
+struct MimeQDecoded {
+	text    []u8
+	end_pos int
+}
+
+// decode_mime_q_delimited tries to parse an encoded word starting at pos.
+// Format: =?charset?encoding?encoded_text?=
+fn decode_mime_q_delimited(s string, pos int) ?MimeQDecoded {
+	// Skip =?
+	mut i := pos + 2
+	// Find charset (everything up to next ?)
+	for i < s.len && s[i] != `?` {
+		i++
+	}
+	if i >= s.len {
+		return none
+	}
+	// Skip ? after charset
+	i++
+	// Encoding character
+	if i >= s.len {
+		return none
+	}
+	encoding := s[i]
+	i++
+	// Expect ? after encoding
+	if i >= s.len || s[i] != `?` {
+		return none
+	}
+	i++ // skip ?
+	// Find encoded text (up to ?=)
+	text_start := i
+	for i + 1 < s.len {
+		if s[i] == `?` && s[i + 1] == `=` {
+			break
+		}
+		i++
+	}
+	if i + 1 >= s.len || s[i] != `?` || s[i + 1] != `=` {
+		return none
+	}
+	encoded_text := s[text_start..i]
+	end_pos := i + 2
+	decoded := decode_mime_q_payload(encoding, encoded_text) or { return none }
+	return MimeQDecoded{
+		text: decoded
+		end_pos: end_pos
+	}
+}
+
+// decode_mime_q_internal handles the format: ?encoding?encoded_text (no delimiters, optional charset)
+fn decode_mime_q_internal(s string) ?string {
+	if s.len < 3 || s[0] != `?` {
+		return none
+	}
+	// Skip optional charset: ?charset?encoding?text or ?encoding?text
+	mut i := 1
+	// Find first ?
+	mut first_q := i
+	for first_q < s.len && s[first_q] != `?` {
+		first_q++
+	}
+	if first_q >= s.len {
+		return none
+	}
+	first_part := s[i..first_q]
+	// Check if first_part is an encoding character (single char B/b/Q/q)
+	if first_part.len == 1 && (first_part[0] == `B` || first_part[0] == `b`
+		|| first_part[0] == `Q` || first_part[0] == `q`) {
+		// ?encoding?text
+		encoding := first_part[0]
+		encoded_text := s[first_q + 1..]
+		decoded := decode_mime_q_payload(encoding, encoded_text) or { return none }
+		return decoded.bytestr()
+	}
+	// ?charset?encoding?text
+	if first_q + 1 >= s.len {
+		return none
+	}
+	encoding := s[first_q + 1]
+	if first_q + 2 >= s.len || s[first_q + 2] != `?` {
+		return none
+	}
+	encoded_text := s[first_q + 3..]
+	decoded := decode_mime_q_payload(encoding, encoded_text) or { return none }
+	return decoded.bytestr()
+}
+
+// decode_mime_q_payload decodes the encoded text based on the encoding type.
+fn decode_mime_q_payload(encoding u8, encoded_text string) ?[]u8 {
+	if encoding == `Q` || encoding == `q` {
+		return decode_mime_q_encoding(encoded_text)
+	} else if encoding == `B` || encoding == `b` {
+		mut padded := encoded_text
+		rem := padded.len % 4
+		if rem > 0 {
+			padded = padded + '='.repeat(4 - rem)
+		}
+		return base64.decode(padded)
+	}
+	return none
+}
+
+// decode_mime_q_encoding decodes Q-encoded text (RFC 2047 Q encoding).
+// Underscores are decoded as spaces, =XX sequences are decoded as hex bytes.
+fn decode_mime_q_encoding(s string) []u8 {
+	mut result := []u8{}
+	mut i := 0
+	for i < s.len {
+		if s[i] == `_` {
+			result << ` `
+			i++
+		} else if s[i] == `=` && i + 2 < s.len {
+			hi := hex_val(s[i + 1])
+			lo := hex_val(s[i + 2])
+			if hi >= 0 && lo >= 0 {
+				result << u8(hi * 16 + lo)
+				i += 3
+			} else {
+				result << s[i]
+				i++
+			}
+		} else {
+			result << s[i]
+			i++
+		}
+	}
+	return result
+}

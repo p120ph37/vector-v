@@ -73,6 +73,8 @@ mut:
 	line      int = 1
 	col       int = 1
 	last_kind TokenKind = .eof
+pub mut:
+	errors []string
 }
 
 pub fn new_lexer(src string) Lexer {
@@ -136,9 +138,10 @@ fn (mut l Lexer) next_token() Token {
 		return l.read_single_string(start_line, start_col)
 	}
 
-	// Dot paths: .foo.bar or .foo@bar
+	// Dot paths: .foo.bar or .foo@bar or .0tar (digit-leading field names) or ."quoted"
 	if ch == `.` && l.pos + 1 < l.src.len && (l.src[l.pos + 1].is_letter()
-		|| l.src[l.pos + 1] == `_` || l.src[l.pos + 1] == `@`) {
+		|| l.src[l.pos + 1] == `_` || l.src[l.pos + 1] == `@` || l.src[l.pos + 1] == `"`
+		|| (l.src[l.pos + 1].is_digit() && l.is_digit_leading_ident(l.pos + 1))) {
 		return l.read_dot_path(start_line, start_col)
 	}
 
@@ -309,7 +312,12 @@ fn (mut l Lexer) read_string(line int, col int) Token {
 					}
 					continue
 				}
-				else { result << l.src[l.pos] }
+				else {
+				c := l.src[l.pos]
+				l.errors << 'invalid escape character: \\${[c].bytestr()}'
+				result << `\\`
+				result << c
+			}
 			}
 		} else if l.src[l.pos] == `{` && l.pos + 1 < l.src.len && l.src[l.pos + 1] == `{` {
 			// Unescaped {{ — this is a template interpolation marker
@@ -322,6 +330,8 @@ fn (mut l Lexer) read_string(line int, col int) Token {
 	}
 	if l.pos < l.src.len {
 		l.advance() // skip closing "
+	} else {
+		l.errors << 'invalid literal'
 	}
 	lit := result.bytestr()
 	if has_template {
@@ -376,6 +386,8 @@ fn (mut l Lexer) read_prefixed_string(prefix u8, line int, col int) Token {
 	}
 	if l.pos < l.src.len {
 		l.advance() // skip closing '
+	} else {
+		l.errors << 'invalid literal'
 	}
 	kind := match prefix {
 		`r` { TokenKind.regex_lit }
@@ -383,6 +395,18 @@ fn (mut l Lexer) read_prefixed_string(prefix u8, line int, col int) Token {
 		else { TokenKind.raw_string }
 	}
 	return Token{kind: kind, lit: result.bytestr(), line: line, col: col}
+}
+
+// is_digit_leading_ident checks if position starts a digit-leading identifier
+// like "0tar" — digits followed by at least one letter/underscore.
+fn (l &Lexer) is_digit_leading_ident(pos int) bool {
+	mut p := pos
+	// Skip digits
+	for p < l.src.len && l.src[p].is_digit() {
+		p++
+	}
+	// Must be followed by a letter or underscore to be an identifier
+	return p < l.src.len && (l.src[p].is_letter() || l.src[p] == `_`)
 }
 
 fn (mut l Lexer) read_dot_path(line int, col int) Token {
@@ -396,7 +420,8 @@ fn (mut l Lexer) read_dot_path(line int, col int) Token {
 			// Peek ahead: if followed by a quote or identifier char, continue path
 			if l.pos + 1 < l.src.len
 				&& (l.src[l.pos + 1].is_letter() || l.src[l.pos + 1] == `_`
-				|| l.src[l.pos + 1] == `"` || l.src[l.pos + 1] == `@`) {
+				|| l.src[l.pos + 1] == `"` || l.src[l.pos + 1] == `@`
+				|| (l.src[l.pos + 1].is_digit() && l.is_digit_leading_ident(l.pos + 1))) {
 				l.advance() // skip .
 			} else {
 				break
@@ -417,15 +442,8 @@ fn (mut l Lexer) read_dot_path(line int, col int) Token {
 			break
 		}
 	}
-	// Check for array index like .foo[0]
-	if l.pos < l.src.len && l.src[l.pos] == `[` {
-		for l.pos < l.src.len && l.src[l.pos] != `]` {
-			l.advance()
-		}
-		if l.pos < l.src.len {
-			l.advance() // skip ]
-		}
-	}
+	// Do NOT absorb array indices like [0] into the dot_ident token.
+	// Array indexing (e.g. .foo[0]) is handled by the parser as postfix [expr].
 	return Token{kind: .dot_ident, lit: l.src[start..l.pos], line: line, col: col}
 }
 
