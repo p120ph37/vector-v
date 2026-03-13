@@ -421,10 +421,11 @@ fn seahash_read_u64(data []u8, offset int) u64 {
 		(u64(data[offset + 7]) << 56)
 }
 
-// xxHash — built from source as a static library (thirdparty/xxhash/).
-// Uses a thin wrapper to isolate from V's bundled zstd XXH_NAMESPACE pollution.
+// xxHash — thin wrapper around system libxxhash (libxxhash-dev).
+// Uses a wrapper to isolate from V's bundled zstd XXH_NAMESPACE pollution.
 #flag -I@VMODROOT/thirdparty/xxhash
 #flag @VMODROOT/thirdparty/xxhash/libxxhash.a
+#flag -lxxhash
 #include "xxhash_wrapper.h"
 
 @[typedef]

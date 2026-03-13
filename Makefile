@@ -17,7 +17,7 @@ test-vrl: thirdparty
 
 clean:
 	rm -f vector-v
-	rm -f thirdparty/xxhash/libxxhash.a thirdparty/xxhash/xxhash_impl.o
+	rm -f thirdparty/xxhash/libxxhash.a thirdparty/xxhash/xxhash_wrapper.o
 
 run-demo:
 	echo "hello world" | ./vector-v -c examples/stdin_to_stdout.toml
