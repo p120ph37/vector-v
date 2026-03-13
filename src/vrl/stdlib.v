@@ -446,12 +446,6 @@ fn (mut rt Runtime) eval_fn_call_named(name string, expr FnCallExpr) !VrlValue {
 			msg_type := if v := named['message_type'] { v } else if pos.len > 2 { pos[2] } else { return error('encode_proto requires message_type') }
 			return fn_encode_proto([pos[0], desc_file, msg_type])
 		}
-		'validate_json_schema' {
-			if pos.len < 1 { return error('validate_json_schema requires at least 2 arguments') }
-			schema_def := if v := named['schema_definition'] { v } else if pos.len > 1 { pos[1] } else { return error('validate_json_schema requires schema_definition') }
-			ignore_uf := if v := named['ignore_unknown_formats'] { v } else if pos.len > 2 { pos[2] } else { VrlValue(false) }
-			return fn_validate_json_schema([pos[0], schema_def, ignore_uf])
-		}
 		'parse_groks' {
 			if pos.len < 1 { return error('parse_groks requires 2 arguments') }
 			patterns := if v := named['patterns'] { v } else if pos.len > 1 { pos[1] } else { return error('parse_groks requires patterns') }
@@ -777,7 +771,6 @@ fn fn_valid_keywords(name string) []string {
 		'dns_lookup' { ['value'] }
 		'encode_charset' { ['value', 'to_charset'] }
 		'decode_charset' { ['value', 'from_charset'] }
-		'validate_json_schema' { ['value', 'schema_definition', 'ignore_unknown_formats'] }
 		else { []string{} }
 	}
 }
