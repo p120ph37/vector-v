@@ -15,9 +15,10 @@ import time
 // fields. Does not support custom instance tags or IAM role arrays.
 // Uses periodic re-fetch rather than lock-free ArcSwap.
 //
-// If the initial metadata fetch fails (and required=false), subsequent
-// refresh attempts are skipped entirely — we assume the process is not
-// running in an EC2 environment.
+// On fetch failure, the cached values (possibly empty) are kept and
+// the next retry is deferred until the refresh interval expires again.
+// This avoids hammering IMDS on every event while still allowing
+// recovery from transient failures.
 pub struct Ec2MetadataTransform {
 	namespace    string
 	fields       []string
@@ -26,7 +27,6 @@ pub struct Ec2MetadataTransform {
 mut:
 	values       map[string]string
 	last_refresh time.Time
-	ec2_unavail  bool // set once IMDS is unreachable; disables further fetches
 }
 
 const ec2_default_endpoint = 'http://169.254.169.254'
@@ -68,14 +68,11 @@ pub fn new_ec2_metadata(opts map[string]string) !Ec2MetadataTransform {
 	refresh_interval := if refresh_secs > 0 { refresh_secs } else { 10 }
 
 	// Do initial fetch
-	mut ec2_unavail := false
 	initial := fetch_all_metadata(endpoint, fields) or {
 		required := opts['required'] or { 'true' }
 		if required == 'true' {
 			return error('ec2_metadata: failed to fetch metadata: ${err}')
 		}
-		// Not in EC2 — mark unavailable so we never retry
-		ec2_unavail = true
 		map[string]string{}
 	}
 
@@ -86,7 +83,6 @@ pub fn new_ec2_metadata(opts map[string]string) !Ec2MetadataTransform {
 		refresh_secs: refresh_interval
 		values: initial.clone()
 		last_refresh: time.now()
-		ec2_unavail: ec2_unavail
 	}
 }
 
@@ -264,13 +260,9 @@ fn parse_identity_document(body string) map[string]string {
 // transform enriches an event with cached EC2 metadata.
 // Refreshes metadata if the cache has expired.
 pub fn (mut t Ec2MetadataTransform) transform(e event.Event) ![]event.Event {
-	// Refresh if stale — but skip entirely if IMDS was already unreachable
-	if !t.ec2_unavail && time.since(t.last_refresh) > time.Duration(i64(t.refresh_secs) * 1_000_000_000) {
-		new_values := fetch_all_metadata(t.endpoint, t.fields) or {
-			// First refresh failure means we're not on EC2; stop trying
-			t.ec2_unavail = true
-			t.values.clone()
-		}
+	// Refresh if stale. On failure, keep cached values and wait for next interval.
+	if time.since(t.last_refresh) > time.Duration(i64(t.refresh_secs) * 1_000_000_000) {
+		new_values := fetch_all_metadata(t.endpoint, t.fields) or { t.values.clone() }
 		t.values = new_values.clone()
 		t.last_refresh = time.now()
 	}
