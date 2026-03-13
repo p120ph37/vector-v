@@ -421,14 +421,22 @@ fn seahash_read_u64(data []u8, offset int) u64 {
 		(u64(data[offset + 7]) << 56)
 }
 
-// xxHash C library bindings via wrapper to avoid namespace conflicts with V's bundled zstd/xxhash
-#flag -lxxhash
-#flag @VMODROOT/src/vrl/xxh3_128_wrapper.o
-#include "@VMODROOT/src/vrl/xxhash_header.h"
-fn C.xxhash_wrap_32(input voidptr, length usize, seed u32) u32
-fn C.xxhash_wrap_64(input voidptr, length usize, seed u64) u64
-fn C.xxhash_wrap_xxh3_64(input voidptr, length usize) u64
-fn C.xxhash_wrap_xxh3_128(input voidptr, length usize, out_hi &u64, out_lo &u64)
+// xxHash — built from source as a static library (thirdparty/xxhash/).
+// Uses a thin wrapper to isolate from V's bundled zstd XXH_NAMESPACE pollution.
+#flag -I@VMODROOT/thirdparty/xxhash
+#flag @VMODROOT/thirdparty/xxhash/libxxhash.a
+#include "xxhash_wrapper.h"
+
+@[typedef]
+struct C.vectorv_xxh128_hash_t {
+	low64  u64
+	high64 u64
+}
+
+fn C.vectorv_xxh32(input voidptr, length usize, seed u32) u32
+fn C.vectorv_xxh64(input voidptr, length usize, seed u64) u64
+fn C.vectorv_xxh3_64bits(input voidptr, length usize) u64
+fn C.vectorv_xxh3_128bits(input voidptr, length usize) C.vectorv_xxh128_hash_t
 
 // xxhash(value, [variant]) - xxHash non-cryptographic hash
 // Supports: XXH32 (default), XXH64, XXH3-64, XXH3-128
@@ -453,24 +461,22 @@ fn fn_xxhash(args []VrlValue) !VrlValue {
 	data := s.bytes()
 	match variant {
 		'XXH32' {
-			h := C.xxhash_wrap_32(data.data, usize(data.len), u32(0))
+			h := C.vectorv_xxh32(data.data, usize(data.len), u32(0))
 			return VrlValue(i64(h))
 		}
 		'XXH64' {
-			h := C.xxhash_wrap_64(data.data, usize(data.len), u64(0))
+			h := C.vectorv_xxh64(data.data, usize(data.len), u64(0))
 			return VrlValue(i64(h))
 		}
 		'XXH3-64' {
-			h := C.xxhash_wrap_xxh3_64(data.data, usize(data.len))
+			h := C.vectorv_xxh3_64bits(data.data, usize(data.len))
 			return VrlValue(i64(h))
 		}
 		'XXH3-128' {
-			mut hi := u64(0)
-			mut lo := u64(0)
-			C.xxhash_wrap_xxh3_128(data.data, usize(data.len), &hi, &lo)
+			h := C.vectorv_xxh3_128bits(data.data, usize(data.len))
 			// Return as string "high64low64" in hex, matching upstream Rust format
-			high_hex := u64_to_hex(hi)
-			low_hex := u64_to_hex(lo)
+			high_hex := u64_to_hex(h.high64)
+			low_hex := u64_to_hex(h.low64)
 			return VrlValue('${high_hex}${low_hex}')
 		}
 		else {

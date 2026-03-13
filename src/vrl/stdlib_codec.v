@@ -671,16 +671,18 @@ fn fn_decode_zstd(args []VrlValue) !VrlValue {
 	return fn_decode_zstd_streaming(data)
 }
 
-// Snappy C bindings
-#flag -lsnappy
+// Snappy C bindings (static)
+#flag /usr/lib/x86_64-linux-gnu/libsnappy.a
+#flag /usr/lib/gcc/x86_64-linux-gnu/13/libstdc++.a
+#flag /usr/lib/gcc/x86_64-linux-gnu/13/libgcc_eh.a
 #include <snappy-c.h>
 fn C.snappy_compress(input &u8, input_length usize, compressed &u8, compressed_length &usize) int
 fn C.snappy_uncompress(compressed &u8, compressed_length usize, uncompressed &u8, uncompressed_length &usize) int
 fn C.snappy_max_compressed_length(source_length usize) usize
 fn C.snappy_uncompressed_length(compressed &u8, compressed_length usize, result &usize) int
 
-// LZ4 C bindings
-#flag -llz4
+// LZ4 C bindings (static)
+#flag /usr/lib/x86_64-linux-gnu/liblz4.a
 #include <lz4.h>
 fn C.LZ4_compressBound(input_size int) int
 fn C.LZ4_compress_default(src &u8, dst &u8, src_size int, dst_capacity int) int
