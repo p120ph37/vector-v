@@ -832,7 +832,7 @@ fn infer_fn_call_type(expr FnCallExpr, mut env TypeEnv) ObjectMap {
 			m.set('array', VrlValue(new_object_map()))
 			return m
 		}
-		'merge', 'parse_regex', 'parse_key_value', 'parse_url',
+		'merge', 'parse_regex', 'parse_key_value', 'parse_url', 'parse_etld',
 		'parse_query_string', 'tally', 'tally_value',
 		'tag_types_externally', 'remove' {
 			mut m := new_object_map()

@@ -371,6 +371,10 @@ fn (mut rt Runtime) eval_fn_call_named(name string, expr FnCallExpr) !VrlValue {
 			if pos.len < 1 { return error('parse_url requires 1 argument') }
 			return fn_parse_url(pos)
 		}
+		'parse_etld' {
+			if pos.len < 1 { return error('parse_etld requires 1 argument') }
+			return fn_parse_etld(pos, named)
+		}
 		'parse_query_string' {
 			if pos.len < 1 { return error('parse_query_string requires 1 argument') }
 			return fn_parse_query_string(pos)
@@ -526,6 +530,7 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'parse_linux_authorization' { return fn_parse_linux_authorization(args) }
 		'parse_csv' { return fn_parse_csv(args) }
 		'parse_url' { return fn_parse_url(args) }
+		'parse_etld' { return fn_parse_etld(args, map[string]VrlValue{}) }
 		'parse_query_string' { return fn_parse_query_string(args) }
 		'parse_tokens' { return fn_parse_tokens(args) }
 		'parse_common_log' { return fn_parse_common_log(args) }
@@ -583,7 +588,7 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'haversine' { return fn_haversine(args) }
 		'redact' { return fn_redact(args) }
 		'match_datadog_query' { return fn_match_datadog_query(args) }
-		'parse_grok' { return error('parse_grok is not implemented') }
+		'parse_grok' { return fn_parse_grok(args) }
 		else { return error('unknown function: ${name}') }
 	}
 }
@@ -613,6 +618,7 @@ fn fn_max_args(name string) int {
 		'ip_version', 'type_def', 'pop',
 		'decode_zlib', 'decode_gzip', 'decode_zstd' { 1 }
 		'encode_punycode', 'decode_punycode' { 2 } // optional validate flag
+		'parse_etld' { 3 } // value, plus_parts, psl
 		else { -1 }
 	}
 }
@@ -670,6 +676,7 @@ fn fn_valid_keywords(name string) []string {
 		'redact' { ['value', 'filters', 'redactor'] }
 		'match_datadog_query' { ['value', 'query'] }
 		'parse_grok' { ['value', 'pattern'] }
+		'parse_etld' { ['value', 'plus_parts', 'psl'] }
 		'parse_aws_cloudwatch_log_subscription_message' { ['value'] }
 		else { []string{} }
 	}
@@ -828,6 +835,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'parse_aws_cloudwatch_log_subscription_message' { return fn_parse_aws_cloudwatch_log_subscription_message([a0]) }
 			'get_timezone_name' { return fn_get_timezone_name([a0]) }
 			'parse_url' { return fn_parse_url([a0]) }
+			'parse_etld' { return fn_parse_etld([a0], map[string]VrlValue{}) }
 			'parse_query_string' { return fn_parse_query_string([a0]) }
 			'parse_bytes' { return fn_parse_bytes([a0]) }
 			'unnest' { return fn_unnest([a0]) }
@@ -983,6 +991,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		'parse_linux_authorization' { return fn_parse_linux_authorization(args) }
 		'parse_csv' { return fn_parse_csv(args) }
 		'parse_url' { return fn_parse_url(args) }
+		'parse_etld' { return fn_parse_etld(args, map[string]VrlValue{}) }
 		'parse_query_string' { return fn_parse_query_string(args) }
 		'parse_tokens' { return fn_parse_tokens(args) }
 		'parse_common_log' { return fn_parse_common_log(args) }
@@ -1043,7 +1052,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		// Datadog query matching
 		'match_datadog_query' { return fn_match_datadog_query(args) }
 		// Grok (stub)
-		'parse_grok' { return error('parse_grok is not implemented') }
+		'parse_grok' { return fn_parse_grok(args) }
 		else { return error('unknown function: ${name}') }
 	}
 }
