@@ -8,7 +8,7 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
   - `vrl/` — VRL (Vector Remap Language) interpreter and runtime
   - `sources/` — Data ingestion components (stdin, demo_logs, fluent)
   - `transforms/` — Data processing (remap, filter, reduce, aws_ec2_metadata)
-  - `sinks/` — Data output destinations (console, blackhole, loki, opentelemetry)
+  - `sinks/` — Data output destinations (console, blackhole, http_client, loki, opentelemetry)
   - `event/` — Event types (log, metric, trace)
   - `topology/` — Component graph management with input-based routing
   - `conf/` — TOML configuration parsing
@@ -20,34 +20,38 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
 ## Build & Test
 
 ```bash
-v .                    # Build
-v test src/            # Run all tests
-v test src/vrl/        # Run VRL tests only
-v test src/sinks/      # Run sink tests only
+v -enable-globals .              # Build (globals required for PSL cache, UUID counter)
+v -enable-globals test src/vrl/  # Run VRL tests
+v -enable-globals test src/      # Run all tests
+make build                       # Build via Makefile
+make test-vrl                    # VRL tests via Makefile
 ```
 
 ## Implemented Components
 
-### Sources
+### Sources (3 / 27 upstream)
 - **stdin** — Reads lines from stdin
 - **demo_logs** — Generates sample log events
 - **fluent** — Fluent Forward Protocol v1 over TCP (msgpack)
 
-### Transforms
+### Transforms (4 / 8 upstream)
 - **remap** — VRL program execution
 - **filter** — Condition-based event filtering
-- **reduce** — Event accumulation with merge strategies (discard, retain, sum, min, max, array, concat, concat_newline, concat_raw, flat_unique, shortest_array, longest_array)
+- **reduce** — Event accumulation with merge strategies
 - **aws_ec2_metadata** — EC2 instance metadata enrichment via IMDSv2
 
-### Sinks
+### Sinks (5 / 43 upstream)
 - **console** — Write to stdout/stderr (json, text, logfmt)
 - **blackhole** — Discard events (benchmarking)
+- **http_client** — Generic HTTP output
 - **loki** — Grafana Loki push API (JSON, label-based batching)
 - **opentelemetry** — OTLP HTTP logs export
 
 ### API
 - `GET /health` — Liveness check
 - `GET /ready` — Readiness check
+
+See [src/vrl/UNIMPLEMENTED.md](src/vrl/UNIMPLEMENTED.md) for VRL function coverage and unimplemented component tracking.
 
 ## Topology & Routing
 
@@ -67,6 +71,13 @@ This is acceptable because JSON serialization (`vrl_to_json`) sorts keys explici
 ### VRL Interpretation Strategy
 
 VRL programs are interpreted rather than compiled to native code. The runtime walks an AST representation of VRL expressions. This trades some execution speed for implementation simplicity compared to the upstream Rust approach of compiling VRL to native Rust.
+
+### C Interop Dependencies
+
+- **xxhash** — System `libxxhash-dev` with thin wrapper in `src/vrl/xxhash_wrapper.{c,h}` to isolate from V's bundled zstd `XXH_NAMESPACE` pollution
+- **pcre2** — System `libpcre2-dev` via `src/pcre2/` C interop for regex support
+- **snappy/lz4** — System `libsnappy-dev`/`liblz4-dev` for codec functions
+- **iconv** — System libc `iconv` for `encode_charset`/`decode_charset`
 
 ### Fluent Source: Simplified msgpack decoder
 
