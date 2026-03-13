@@ -1231,6 +1231,13 @@ fn ruby_skip_ws(s string, pos int) int {
 // Parses an XML document into a VRL object.
 // Options: trim, include_attr, attr_prefix, text_key, always_use_text_key,
 //          parse_bool, parse_null, parse_number
+//
+// Aims for 100% feature parity with upstream VRL parse_xml which uses
+// roxmltree for parsing.  roxmltree supports: elements, text, CDATA,
+// comments (silently discarded), processing instructions (silently
+// discarded but counted for child-count), namespaces (preserved as
+// prefix in tag names), the five predefined XML entities plus numeric
+// character references (&#NNN; / &#xHH;), and DOCTYPE (skipped).
 // ============================================================================
 
 fn fn_parse_xml(args []VrlValue) !VrlValue {
@@ -1319,14 +1326,14 @@ fn fn_parse_xml(args []VrlValue) !VrlValue {
 }
 
 struct XmlParseOpts {
-	trim               bool = true
-	include_attr       bool = true
-	attr_prefix        string = '@'
-	text_key           string = 'text'
+	trim                bool = true
+	include_attr        bool = true
+	attr_prefix         string = '@'
+	text_key            string = 'text'
 	always_use_text_key bool
-	parse_bool         bool = true
-	parse_null         bool = true
-	parse_number       bool = true
+	parse_bool          bool = true
+	parse_null          bool = true
+	parse_number        bool = true
 }
 
 struct XmlElement {
@@ -1335,32 +1342,137 @@ struct XmlElement {
 	children   []XmlNode
 }
 
-type XmlNode = XmlElement | string
+// XmlNonContent represents comments and processing instructions.
+// They count toward children (affecting flattening decisions) but
+// produce no output — matching upstream roxmltree behaviour where
+// node.children().count() includes all node types but recurse()
+// filters to element + text only.
+struct XmlNonContent {}
+
+type XmlNode = XmlElement | XmlNonContent | string
+
+// xml_trim_whitespace removes whitespace-only runs between XML tags,
+// replicating the upstream Rust regex  r">\s+?<"  →  "><".
+fn xml_trim_whitespace(s string) string {
+	if !s.contains_any_substr(['>\n', '> ', '>\t', '>\r']) {
+		return s
+	}
+	mut result := []u8{cap: s.len}
+	mut i := 0
+	for i < s.len {
+		result << s[i]
+		if s[i] == `>` {
+			// Scan ahead: if only whitespace until next '<', skip it.
+			mut j := i + 1
+			for j < s.len && (s[j] == ` ` || s[j] == `\n` || s[j] == `\r` || s[j] == `\t`) {
+				j++
+			}
+			if j < s.len && s[j] == `<` && j > i + 1 {
+				i = j // skip whitespace; next iteration appends '<'
+				continue
+			}
+		}
+		i++
+	}
+	return result.bytestr()
+}
+
+// xml_line_col computes 1-based line and column from a byte offset.
+fn xml_line_col(s string, pos int) (int, int) {
+	mut line := 1
+	mut col := 1
+	limit := if pos < s.len { pos } else { s.len }
+	for i in 0 .. limit {
+		if s[i] == `\n` {
+			line++
+			col = 1
+		} else {
+			col++
+		}
+	}
+	return line, col
+}
 
 fn xml_parse(input string, opts XmlParseOpts) !VrlValue {
-	// Simple XML parser
 	trimmed := input.trim_space()
 	if trimmed.len == 0 {
-		return error('parse_xml: empty input')
+		return error('unable to parse xml: empty input')
 	}
 
-	// Skip XML declaration <?xml ...?>
+	// Apply trim pre-processing: collapse whitespace between tags.
+	// This matches upstream behaviour where the regex  >\s+?<  → ><
+	// is applied to the whole string BEFORE parsing.
+	mut content := if opts.trim { xml_trim_whitespace(trimmed) } else { trimmed }
+
 	mut pos := 0
-	content := trimmed
-	if content.starts_with('<?') {
-		end := content.index('?>') or { return error('parse_xml: unterminated XML declaration') }
-		pos = end + 2
+
+	// Skip leading non-element content (XML declaration, comments, DOCTYPE, PIs)
+	for pos < content.len {
+		// Skip whitespace
+		for pos < content.len
+			&& (content[pos] == ` ` || content[pos] == `\n` || content[pos] == `\r`
+			|| content[pos] == `\t`) {
+			pos++
+		}
+		if pos >= content.len {
+			break
+		}
+
+		// XML declaration or processing instruction  <?...?>
+		if pos + 1 < content.len && content[pos] == `<` && content[pos + 1] == `?` {
+			end := content.index_after_('?>', pos + 2)
+			if end < 0 {
+				return error('unable to parse xml: unterminated processing instruction')
+			}
+			pos = end + 2
+			continue
+		}
+
+		// Comment  <!--...-->
+		if pos + 3 < content.len && content[pos..pos + 4] == '<!--' {
+			end := content.index_after_('-->', pos + 4)
+			if end < 0 {
+				return error('unable to parse xml: unterminated comment')
+			}
+			pos = end + 3
+			continue
+		}
+
+		// DOCTYPE  <!DOCTYPE ...>  (may contain internal subset in [...])
+		if pos + 8 < content.len && content[pos..pos + 9].to_upper() == '<!DOCTYPE' {
+			pos = xml_skip_doctype(content, pos)!
+			continue
+		}
+
+		break
 	}
 
-	// Skip whitespace
-	for pos < content.len && (content[pos] == ` ` || content[pos] == `\n` || content[pos] == `\r`
-		|| content[pos] == `\t`) {
-		pos++
+	if pos >= content.len || content[pos] != `<` {
+		line, col := xml_line_col(content, pos)
+		return error('unable to parse xml: unknown token at ${line}:${col}')
 	}
 
 	// Parse root element
 	element, _ := xml_parse_element(content, pos)!
 	return xml_element_to_vrl(element, opts)
+}
+
+// xml_skip_doctype advances past a <!DOCTYPE ...> declaration,
+// handling an optional internal subset delimited by [...].
+fn xml_skip_doctype(s string, start int) !int {
+	mut p := start + 9 // skip "<!DOCTYPE"
+	mut depth := 0
+	for p < s.len {
+		if s[p] == `[` {
+			depth++
+		} else if s[p] == `]` {
+			depth--
+		} else if s[p] == `>` && depth == 0 {
+			return p + 1
+		}
+		p++
+	}
+	return error('unable to parse xml: unterminated DOCTYPE')
 }
 
 fn xml_parse_element(s string, pos int) !(XmlElement, int) {
@@ -1373,14 +1485,20 @@ fn xml_parse_element(s string, pos int) !(XmlElement, int) {
 
 	// Expect <
 	if p >= s.len || s[p] != `<` {
-		return error('parse_xml: expected < at position ${p}')
+		line, col := xml_line_col(s, p)
+		return error('unable to parse xml: unknown token at ${line}:${col}')
 	}
 	p++ // skip <
 
-	// Read tag name
+	// Read tag name  (may include namespace prefix like  ns:tag)
 	mut tag_end := p
-	for tag_end < s.len && s[tag_end] != ` ` && s[tag_end] != `>` && s[tag_end] != `/` {
+	for tag_end < s.len && s[tag_end] != ` ` && s[tag_end] != `>` && s[tag_end] != `/`
+		&& s[tag_end] != `\n` && s[tag_end] != `\r` && s[tag_end] != `\t` {
 		tag_end++
+	}
+	if tag_end == p {
+		line, col := xml_line_col(s, p)
+		return error('unable to parse xml: unknown token at ${line}:${col}')
 	}
 	tag := s[p..tag_end]
 	p = tag_end
@@ -1398,14 +1516,25 @@ fn xml_parse_element(s string, pos int) !(XmlElement, int) {
 
 		// Read attribute name
 		mut attr_end := p
-		for attr_end < s.len && s[attr_end] != `=` && s[attr_end] != ` ` && s[attr_end] != `>` {
+		for attr_end < s.len && s[attr_end] != `=` && s[attr_end] != ` ` && s[attr_end] != `>`
+			&& s[attr_end] != `\n` && s[attr_end] != `\r` && s[attr_end] != `\t` {
 			attr_end++
 		}
 		attr_name := s[p..attr_end]
 		p = attr_end
 
+		// Skip whitespace before =
+		for p < s.len && (s[p] == ` ` || s[p] == `\n` || s[p] == `\r` || s[p] == `\t`) {
+			p++
+		}
+
 		// Skip =
 		if p < s.len && s[p] == `=` {
+			p++
+		}
+
+		// Skip whitespace after =
+		for p < s.len && (s[p] == ` ` || s[p] == `\n` || s[p] == `\r` || s[p] == `\t`) {
 			p++
 		}
 
@@ -1446,20 +1575,9 @@ fn xml_parse_element(s string, pos int) !(XmlElement, int) {
 	// Parse children
 	mut children := []XmlNode{}
 	for p < s.len {
-		// Skip whitespace for element detection
-		mut wp := p
-		for wp < s.len && (s[wp] == ` ` || s[wp] == `\n` || s[wp] == `\r` || s[wp] == `\t`) {
-			wp++
-		}
-
-		if wp >= s.len {
-			break
-		}
-
-		// Check for closing tag
-		if wp + 1 < s.len && s[wp] == `<` && s[wp + 1] == `/` {
-			// Find >
-			mut close_end := wp + 2
+		// Check for closing tag  </tag>
+		if p + 1 < s.len && s[p] == `<` && s[p + 1] == `/` {
+			mut close_end := p + 2
 			for close_end < s.len && s[close_end] != `>` {
 				close_end++
 			}
@@ -1467,45 +1585,64 @@ fn xml_parse_element(s string, pos int) !(XmlElement, int) {
 			break
 		}
 
-		// Check for comment <!-- ... -->
-		if wp + 3 < s.len && s[wp..wp + 4] == '<!--' {
-			end := s.index_after_('-->', wp + 4)
+		// Comment  <!--...-->
+		if p + 3 < s.len && s[p..p + 4] == '<!--' {
+			end := s.index_after_('-->', p + 4)
 			if end < 0 {
-				return error('parse_xml: unterminated comment')
+				return error('unable to parse xml: unterminated comment')
 			}
+			children << XmlNode(XmlNonContent{})
 			p = end + 3
 			continue
 		}
 
-		// Check for CDATA <![CDATA[...]]>
-		if wp + 8 < s.len && s[wp..wp + 9] == '<![CDATA[' {
-			end := s.index_after_(']]>', wp + 9)
+		// CDATA  <![CDATA[...]]>
+		if p + 8 < s.len && s[p..p + 9] == '<![CDATA[' {
+			end := s.index_after_(']]>', p + 9)
 			if end < 0 {
-				return error('parse_xml: unterminated CDATA')
+				return error('unable to parse xml: unterminated CDATA')
 			}
-			cdata := s[wp + 9..end]
+			cdata := s[p + 9..end]
 			children << XmlNode(cdata)
 			p = end + 3
 			continue
 		}
 
+		// Processing instruction  <?...?>
+		if p + 1 < s.len && s[p] == `<` && s[p + 1] == `?` {
+			end := s.index_after_('?>', p + 2)
+			if end < 0 {
+				return error('unable to parse xml: unterminated processing instruction')
+			}
+			children << XmlNode(XmlNonContent{})
+			p = end + 2
+			continue
+		}
+
+		// DOCTYPE inside element (rare but legal in some contexts)
+		if p + 8 < s.len && s[p..p + 9].to_upper() == '<!DOCTYPE' {
+			p = xml_skip_doctype(s, p)!
+			children << XmlNode(XmlNonContent{})
+			continue
+		}
+
 		// Child element
-		if s[wp] == `<` {
-			child_elem, np := xml_parse_element(s, wp)!
+		if s[p] == `<` {
+			child_elem, np := xml_parse_element(s, p)!
 			children << XmlNode(child_elem)
 			p = np
 			continue
 		}
 
-		// Text node
-		mut text_end := wp
+		// Text node — collect everything up to the next '<'
+		mut text_end := p
 		for text_end < s.len && s[text_end] != `<` {
 			text_end++
 		}
-		text := s[wp..text_end]
-		if text.trim_space().len > 0 {
-			children << XmlNode(text)
-		}
+		text := s[p..text_end]
+		// Always include text nodes; whitespace handling is done by
+		// the trim pre-processing step and the VRL conversion layer.
+		children << XmlNode(text)
 		p = text_end
 	}
 
@@ -1523,69 +1660,119 @@ fn xml_element_to_vrl(elem XmlElement, opts XmlParseOpts) !VrlValue {
 	return VrlValue(outer)
 }
 
+// xml_element_content_to_vrl converts an XmlElement's content to a VrlValue.
+// This mirrors the upstream process_node() logic for NodeType::Element:
+//   - If attrs present and include_attr → recurse (object)
+//   - If always_use_text_key → recurse (object)
+//   - If exactly 1 child that is an element → wrap { child_tag: process(child) }
+//   - If exactly 1 child that is text → flatten to scalar
+//   - Otherwise (0 or 2+ children) → recurse (object)
 fn xml_element_content_to_vrl(elem XmlElement, opts XmlParseOpts) !VrlValue {
-	mut obj := new_object_map()
-	mut has_children := false
+	has_attrs := opts.include_attr && elem.attributes.len > 0
+	total_children := elem.children.len
 
-	// Add attributes
+	// If attributes present, always recurse to expand attribute keys
+	if has_attrs {
+		return xml_recurse(elem, opts)
+	}
+
+	// If always_use_text_key, always recurse
+	if opts.always_use_text_key {
+		return xml_recurse(elem, opts)
+	}
+
+	// Check total children count (including non-content like comments/PIs)
+	if total_children == 1 {
+		child := elem.children[0]
+		match child {
+			XmlElement {
+				// Single element child — wrap it
+				mut m := new_object_map()
+				inner := xml_element_content_to_vrl(child, opts)!
+				m.set(child.tag, inner)
+				return VrlValue(m)
+			}
+			string {
+				// Single text child — flatten to scalar
+				return xml_parse_scalar(xml_unescape(child), opts)
+			}
+			XmlNonContent {
+				// Single non-content child (comment/PI only) — empty object
+				return xml_recurse(elem, opts)
+			}
+		}
+	}
+
+	// 0 or 2+ children — recurse
+	return xml_recurse(elem, opts)
+}
+
+// xml_recurse builds an ObjectMap from an element's attributes and children.
+// Mirrors upstream recurse() closure: processes only element + text children,
+// uses entry-based logic for duplicate keys (converting to arrays).
+fn xml_recurse(elem XmlElement, opts XmlParseOpts) !VrlValue {
+	mut obj := new_object_map()
+
+	// Add attributes as string values (upstream does NOT parse attrs as scalars)
 	if opts.include_attr {
 		for attr_name, attr_val in elem.attributes {
-			obj.set('${opts.attr_prefix}${attr_name}', xml_parse_scalar(attr_val, opts))
-			has_children = true
+			obj.set('${opts.attr_prefix}${attr_name}', VrlValue(attr_val))
 		}
 	}
 
-	// Collect child elements and text
-	mut text_parts := []string{}
-	mut child_elements := map[string][]VrlValue{}
-
+	// Process children in order (only element and text, skip XmlNonContent)
 	for child in elem.children {
 		match child {
-			string {
-				txt := if opts.trim { child.trim_space() } else { child }
-				if txt.len > 0 {
-					text_parts << xml_unescape(txt)
-				}
-			}
 			XmlElement {
 				child_vrl := xml_element_content_to_vrl(child, opts)!
-				if child.tag !in child_elements {
-					child_elements[child.tag] = []VrlValue{}
+				key := child.tag
+				existing := obj.get(key)
+				if existing != none {
+					ex := existing
+					match ex {
+						[]VrlValue {
+							mut arr := ex.clone()
+							arr << child_vrl
+							obj.set(key, VrlValue(arr))
+						}
+						else {
+							obj.set(key, VrlValue([ex, child_vrl]))
+						}
+					}
+				} else {
+					obj.set(key, child_vrl)
 				}
-				child_elements[child.tag] << child_vrl
-				has_children = true
 			}
+			string {
+				txt := xml_unescape(child)
+				key := opts.text_key
+				val := xml_parse_scalar(txt, opts)
+				existing := obj.get(key)
+				if existing != none {
+					ex := existing
+					match ex {
+						[]VrlValue {
+							mut arr := ex.clone()
+							arr << val
+							obj.set(key, VrlValue(arr))
+						}
+						else {
+							obj.set(key, VrlValue([ex, val]))
+						}
+					}
+				} else {
+					obj.set(key, val)
+				}
+			}
+			XmlNonContent {} // silently ignored
 		}
-	}
-
-	// Add child elements
-	for child_tag, values in child_elements {
-		if values.len == 1 {
-			obj.set(child_tag, values[0])
-		} else {
-			obj.set(child_tag, VrlValue(values))
-		}
-	}
-
-	// Handle text
-	text := text_parts.join('')
-	if text.len > 0 {
-		if !has_children && !opts.always_use_text_key {
-			// Simple text-only element
-			return xml_parse_scalar(text, opts)
-		}
-		obj.set(opts.text_key, xml_parse_scalar(text, opts))
-	}
-
-	if obj.len() == 0 && !has_children {
-		return VrlValue(VrlNull{})
 	}
 
 	return VrlValue(obj)
 }
 
 fn xml_parse_scalar(s string, opts XmlParseOpts) VrlValue {
-	if opts.parse_null && s == 'null' {
+	if opts.parse_null && (s == 'null' || s.len == 0) {
 		return VrlValue(VrlNull{})
 	}
 	if opts.parse_bool {
@@ -1624,12 +1811,103 @@ fn xml_parse_scalar(s string, opts XmlParseOpts) VrlValue {
 	return VrlValue(s)
 }
 
+// xml_unescape resolves XML entity references and numeric character
+// references.  Handles the five predefined entities (&amp; &lt; &gt;
+// &quot; &apos;) plus decimal (&#NNN;) and hexadecimal (&#xHH;) forms.
 fn xml_unescape(s string) string {
 	if !s.contains('&') {
 		return s
 	}
-	return s.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&quot;',
-		'"').replace('&apos;', "'")
+	mut result := []u8{cap: s.len}
+	mut i := 0
+	for i < s.len {
+		if s[i] == `&` {
+			// Find the closing semicolon
+			mut end := i + 1
+			for end < s.len && s[end] != `;` && end - i < 12 {
+				end++
+			}
+			if end < s.len && s[end] == `;` {
+				ref := s[i + 1..end]
+				if ref == 'amp' {
+					result << `&`
+					i = end + 1
+					continue
+				} else if ref == 'lt' {
+					result << `<`
+					i = end + 1
+					continue
+				} else if ref == 'gt' {
+					result << `>`
+					i = end + 1
+					continue
+				} else if ref == 'quot' {
+					result << `"`
+					i = end + 1
+					continue
+				} else if ref == 'apos' {
+					result << `'`
+					i = end + 1
+					continue
+				} else if ref.len > 1 && ref[0] == `#` {
+					// Numeric character reference
+					mut codepoint := u32(0)
+					mut valid := true
+					if ref.len > 2 && (ref[1] == `x` || ref[1] == `X`) {
+						// Hexadecimal  &#xHH;
+						hex := ref[2..]
+						for hc in hex.bytes() {
+							codepoint = codepoint * 16
+							if hc >= `0` && hc <= `9` {
+								codepoint += u32(hc - `0`)
+							} else if hc >= `a` && hc <= `f` {
+								codepoint += u32(hc - `a` + 10)
+							} else if hc >= `A` && hc <= `F` {
+								codepoint += u32(hc - `A` + 10)
+							} else {
+								valid = false
+								break
+							}
+						}
+					} else {
+						// Decimal  &#NNN;
+						dec := ref[1..]
+						for dc in dec.bytes() {
+							if dc >= `0` && dc <= `9` {
+								codepoint = codepoint * 10 + u32(dc - `0`)
+							} else {
+								valid = false
+								break
+							}
+						}
+					}
+					if valid && codepoint > 0 && codepoint <= 0x10FFFF {
+						// Encode as UTF-8
+						if codepoint < 0x80 {
+							result << u8(codepoint)
+						} else if codepoint < 0x800 {
+							result << u8(0xC0 | (codepoint >> 6))
+							result << u8(0x80 | (codepoint & 0x3F))
+						} else if codepoint < 0x10000 {
+							result << u8(0xE0 | (codepoint >> 12))
+							result << u8(0x80 | ((codepoint >> 6) & 0x3F))
+							result << u8(0x80 | (codepoint & 0x3F))
+						} else {
+							result << u8(0xF0 | (codepoint >> 18))
+							result << u8(0x80 | ((codepoint >> 12) & 0x3F))
+							result << u8(0x80 | ((codepoint >> 6) & 0x3F))
+							result << u8(0x80 | (codepoint & 0x3F))
+						}
+						i = end + 1
+						continue
+					}
+				}
+			}
+		}
+		result << s[i]
+		i++
+	}
+	return result.bytestr()
 }
 
 // ============================================================================
