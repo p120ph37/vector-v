@@ -406,7 +406,9 @@ fn parse_url_string(s string) !VrlValue {
 			port = VrlValue(possible_port.i64())
 		}
 	}
-	result.set('host', VrlValue(host))
+	// Punycode-encode international domain names (like the url crate does)
+	encoded_host := punycode_encode_domain(host)
+	result.set('host', VrlValue(encoded_host))
 	result.set('port', port)
 	result.set('username', VrlValue(username))
 	result.set('password', VrlValue(password))
@@ -2087,7 +2089,17 @@ fn parse_syslog_rfc3164(s string, facility int, severity int) !VrlValue {
 	mut procid := VrlValue(VrlNull{})
 	mut message := remaining
 
-	if colon_idx := remaining.index(': ') {
+	// Try ": " first, then ":" without space
+	mut colon_idx := -1
+	mut msg_offset := 2
+	if ci := remaining.index(': ') {
+		colon_idx = ci
+		msg_offset = 2
+	} else if ci2 := remaining.index(':') {
+		colon_idx = ci2
+		msg_offset = 1
+	}
+	if colon_idx >= 0 {
 		prefix := remaining[..colon_idx]
 		if bracket_idx := prefix.index('[') {
 			// appname[procid]
@@ -2097,7 +2109,7 @@ fn parse_syslog_rfc3164(s string, facility int, severity int) !VrlValue {
 		} else {
 			appname = VrlValue(prefix)
 		}
-		message = remaining[colon_idx + 2..]
+		message = remaining[colon_idx + msg_offset..]
 	}
 
 	result.set('appname', appname)
@@ -2926,4 +2938,132 @@ fn yaml_unquote(s string) string {
 		return inner.replace("''", "'")
 	}
 	return s
+}
+
+// parse_aws_cloudwatch_log_subscription_message(value) - parses an AWS CloudWatch Logs subscription message JSON string.
+// Returns an object with: owner, message_type, log_group, log_stream, subscription_filters, log_events.
+// The log_events array contains objects with: id, timestamp (as Timestamp), message.
+fn fn_parse_aws_cloudwatch_log_subscription_message(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('parse_aws_cloudwatch_log_subscription_message requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('parse_aws_cloudwatch_log_subscription_message requires a string') }
+	}
+
+	// Parse the JSON string
+	parsed := parse_json_recursive(s) or { return error('unable to parse: ${err.msg()}') }
+
+	// The parsed value must be an object
+	obj := match parsed {
+		ObjectMap { parsed }
+		else { return error('unable to parse: expected object') }
+	}
+
+	// Extract required fields
+	message_type_val := obj.get('messageType') or {
+		return error('unable to parse: missing field messageType')
+	}
+	message_type := match message_type_val {
+		string { message_type_val }
+		else { return error('unable to parse: messageType must be a string') }
+	}
+	// Validate message type
+	if message_type != 'DATA_MESSAGE' && message_type != 'CONTROL_MESSAGE' {
+		return error('unable to parse: invalid messageType')
+	}
+
+	owner_val := obj.get('owner') or { return error('unable to parse: missing field owner') }
+	owner := match owner_val {
+		string { owner_val }
+		else { return error('unable to parse: owner must be a string') }
+	}
+
+	log_group_val := obj.get('logGroup') or {
+		return error('unable to parse: missing field logGroup')
+	}
+	log_group := match log_group_val {
+		string { log_group_val }
+		else { return error('unable to parse: logGroup must be a string') }
+	}
+
+	log_stream_val := obj.get('logStream') or {
+		return error('unable to parse: missing field logStream')
+	}
+	log_stream := match log_stream_val {
+		string { log_stream_val }
+		else { return error('unable to parse: logStream must be a string') }
+	}
+
+	sub_filters_val := obj.get('subscriptionFilters') or {
+		return error('unable to parse: missing field subscriptionFilters')
+	}
+	sub_filters_arr := match sub_filters_val {
+		[]VrlValue { sub_filters_val }
+		else { return error('unable to parse: subscriptionFilters must be an array') }
+	}
+
+	log_events_val := obj.get('logEvents') or {
+		return error('unable to parse: missing field logEvents')
+	}
+	log_events_arr := match log_events_val {
+		[]VrlValue { log_events_val }
+		else { return error('unable to parse: logEvents must be an array') }
+	}
+
+	// Process log events: convert each to object with id, timestamp, message
+	mut result_events := []VrlValue{cap: log_events_arr.len}
+	for ev in log_events_arr {
+		ev_obj := match ev {
+			ObjectMap { ev }
+			else { return error('unable to parse: logEvent must be an object') }
+		}
+
+		ev_id_val := ev_obj.get('id') or {
+			return error('unable to parse: logEvent missing id')
+		}
+		ev_id := match ev_id_val {
+			string { ev_id_val }
+			else { return error('unable to parse: logEvent id must be a string') }
+		}
+
+		ev_ts_val := ev_obj.get('timestamp') or {
+			return error('unable to parse: logEvent missing timestamp')
+		}
+		ev_ts_ms := match ev_ts_val {
+			i64 { ev_ts_val }
+			else { return error('unable to parse: logEvent timestamp must be an integer') }
+		}
+
+		ev_msg_val := ev_obj.get('message') or {
+			return error('unable to parse: logEvent missing message')
+		}
+		ev_msg := match ev_msg_val {
+			string { ev_msg_val }
+			else { return error('unable to parse: logEvent message must be a string') }
+		}
+
+		// Convert millisecond timestamp to Timestamp
+		secs := ev_ts_ms / 1000
+		micro := (ev_ts_ms % 1000) * 1000
+		ts := Timestamp{t: time.unix_microsecond(int(secs), int(micro))}
+
+		mut ev_result := new_object_map()
+		ev_result.set('id', VrlValue(ev_id))
+		ev_result.set('timestamp', VrlValue(ts))
+		ev_result.set('message', VrlValue(ev_msg))
+		result_events << VrlValue(ev_result)
+	}
+
+	mut result := new_object_map()
+	result.set('owner', VrlValue(owner))
+	result.set('message_type', VrlValue(message_type))
+	result.set('log_group', VrlValue(log_group))
+	result.set('log_stream', VrlValue(log_stream))
+	result.set('subscription_filters', VrlValue(sub_filters_arr))
+	result.set('log_events', VrlValue(result_events))
+
+	return VrlValue(result)
 }

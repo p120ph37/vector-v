@@ -4,24 +4,22 @@ module vrl
 fn uses_unimplemented_fn(src string) bool {
 	unimplemented := [
 		// Crypto (not available in V stdlib)
-		'sha3', 'seahash', 'xxhash',
+		'seahash', 'xxhash',
 		// Complex parsing (require specialized formats)
 		'parse_xml',
 		'parse_nginx_log', 'parse_apache_log', 'parse_aws_alb_log',
-		'parse_aws_cloudwatch_log_subscription_message', 'parse_aws_vpc_flow_log',
+		'parse_aws_vpc_flow_log',
 		'parse_cef', 'parse_user_agent', 'parse_etld',
-		'parse_ruby_hash', 'parse_glog', 'parse_grok', 'parse_groks',
+		'parse_ruby_hash', 'parse_glog', 'parse_groks',
 		'parse_influxdb', 'parse_proto',
 		// Codec (require external libs)
-		'encode_punycode', 'decode_punycode',
 		'encode_snappy', 'decode_snappy',
 		'encode_proto', 'decode_proto',
 		'encode_charset', 'decode_charset',
 		// Other unimplemented
-		'match_datadog_query',
-		'redact', 'community_id', 'decrypt', 'encrypt',
+		'community_id', 'decrypt', 'encrypt',
 		'murmur3', 'crc',
-		'mezmo_patterns', 'punycode',
+		'mezmo_patterns',
 		'reverse_dns',
 		'decrypt_ip', 'encrypt_ip',
 		'http_request',

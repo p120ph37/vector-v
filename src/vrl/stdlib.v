@@ -496,6 +496,8 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'decode_gzip' { return fn_decode_gzip(args) }
 		'encode_zstd' { return fn_encode_zstd(args) }
 		'decode_zstd' { return fn_decode_zstd(args) }
+		'encode_punycode' { return fn_encode_punycode(args) }
+		'decode_punycode' { return fn_decode_punycode(args) }
 		// Crypto
 		'sha1' { return fn_sha1(args) }
 		'sha2' { return fn_sha2(args) }
@@ -529,6 +531,7 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'parse_common_log' { return fn_parse_common_log(args) }
 		'parse_yaml' { return fn_parse_yaml(args) }
 		'parse_syslog' { return fn_parse_syslog(args) }
+		'parse_aws_cloudwatch_log_subscription_message' { return fn_parse_aws_cloudwatch_log_subscription_message(args) }
 		'parse_duration' { return fn_parse_duration(args) }
 		'parse_bytes' { return fn_parse_bytes(args) }
 		'parse_int' { return fn_parse_int(args) }
@@ -578,6 +581,9 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'get_hostname' { return fn_get_hostname() }
 		'get_timezone_name' { return fn_get_timezone_name(args) }
 		'haversine' { return fn_haversine(args) }
+		'redact' { return fn_redact(args) }
+		'match_datadog_query' { return fn_match_datadog_query(args) }
+		'parse_grok' { return error('parse_grok is not implemented') }
 		else { return error('unknown function: ${name}') }
 	}
 }
@@ -606,6 +612,7 @@ fn fn_max_args(name string) int {
 		'tag_types_externally', 'tally',
 		'ip_version', 'type_def', 'pop',
 		'decode_zlib', 'decode_gzip', 'decode_zstd' { 1 }
+		'encode_punycode', 'decode_punycode' { 2 } // optional validate flag
 		else { -1 }
 	}
 }
@@ -658,6 +665,12 @@ fn fn_valid_keywords(name string) []string {
 		'assert' { ['condition', 'message'] }
 		'assert_eq' { ['left', 'right', 'message'] }
 		'log' { ['value', 'level', 'rate_limit_secs'] }
+		'encode_punycode' { ['value', 'validate'] }
+		'decode_punycode' { ['value', 'validate'] }
+		'redact' { ['value', 'filters', 'redactor'] }
+		'match_datadog_query' { ['value', 'query'] }
+		'parse_grok' { ['value', 'pattern'] }
+		'parse_aws_cloudwatch_log_subscription_message' { ['value'] }
 		else { []string{} }
 	}
 }
@@ -796,6 +809,8 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'decode_gzip' { return fn_decode_gzip([a0]) }
 			'encode_zstd' { return fn_encode_zstd([a0]) }
 			'decode_zstd' { return fn_decode_zstd([a0]) }
+			'encode_punycode' { return fn_encode_punycode([a0]) }
+			'decode_punycode' { return fn_decode_punycode([a0]) }
 			'sha1' { return fn_sha1([a0]) }
 			'md5' { return fn_md5([a0]) }
 			'crc32' { return fn_crc32([a0]) }
@@ -810,6 +825,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'parse_logfmt' { return fn_parse_logfmt([a0]) }
 			'parse_klog' { return fn_parse_klog([a0]) }
 			'parse_linux_authorization' { return fn_parse_linux_authorization([a0]) }
+			'parse_aws_cloudwatch_log_subscription_message' { return fn_parse_aws_cloudwatch_log_subscription_message([a0]) }
 			'get_timezone_name' { return fn_get_timezone_name([a0]) }
 			'parse_url' { return fn_parse_url([a0]) }
 			'parse_query_string' { return fn_parse_query_string([a0]) }
@@ -843,6 +859,8 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'encode_zlib' { return fn_encode_zlib([a0, a1]) }
 			'encode_gzip' { return fn_encode_gzip([a0, a1]) }
 			'encode_zstd' { return fn_encode_zstd([a0, a1]) }
+			'redact' { return fn_redact([a0, a1]) }
+			'match_datadog_query' { return fn_match_datadog_query([a0, a1]) }
 			else {}
 		}
 	}
@@ -935,6 +953,8 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		'decode_gzip' { return fn_decode_gzip(args) }
 		'encode_zstd' { return fn_encode_zstd(args) }
 		'decode_zstd' { return fn_decode_zstd(args) }
+		'encode_punycode' { return fn_encode_punycode(args) }
+		'decode_punycode' { return fn_decode_punycode(args) }
 		// Crypto
 		'sha1' { return fn_sha1(args) }
 		'sha2' { return fn_sha2(args) }
@@ -968,6 +988,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		'parse_common_log' { return fn_parse_common_log(args) }
 		'parse_yaml' { return fn_parse_yaml(args) }
 		'parse_syslog' { return fn_parse_syslog(args) }
+		'parse_aws_cloudwatch_log_subscription_message' { return fn_parse_aws_cloudwatch_log_subscription_message(args) }
 		'parse_duration' { return fn_parse_duration(args) }
 		'parse_bytes' { return fn_parse_bytes(args) }
 		'parse_int' { return fn_parse_int(args) }
@@ -1017,6 +1038,12 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		'get_hostname' { return fn_get_hostname() }
 		'get_timezone_name' { return fn_get_timezone_name(args) }
 		'haversine' { return fn_haversine(args) }
+		// Redact
+		'redact' { return fn_redact(args) }
+		// Datadog query matching
+		'match_datadog_query' { return fn_match_datadog_query(args) }
+		// Grok (stub)
+		'parse_grok' { return error('parse_grok is not implemented') }
 		else { return error('unknown function: ${name}') }
 	}
 }
