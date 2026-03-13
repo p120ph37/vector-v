@@ -162,6 +162,9 @@ fn static_check(expr Expr) ! {
 	// E642: check parent path type mismatches (variable type tracking)
 	mut var_types := map[string]string{} // var name -> simple type
 	check_e642(expr, mut var_types)!
+	// Check for unhandled fallible expressions after del() on array elements
+	mut del_paths := map[string]bool{}
+	check_del_fallibility(expr, mut del_paths)!
 }
 
 // check_e642 walks the AST tracking variable types and checking for
@@ -620,4 +623,111 @@ fn check_read_only_target(target Expr, ro_paths []string, ro_rec_paths []string,
 		}
 		else {}
 	}
+}
+
+// check_del_fallibility tracks del() calls on array-indexed paths and flags
+// subsequent unhandled binary operations that use those paths as E100.
+// After del(.arr[N]), .arr[M] could be out of bounds, making .arr[M] + X fallible.
+fn check_del_fallibility(expr Expr, mut del_paths map[string]bool) ! {
+	match expr {
+		BlockExpr {
+			for e in expr.exprs {
+				check_del_fallibility(e, mut del_paths)!
+			}
+		}
+		FnCallExpr {
+			mut name := expr.name
+			if name.len > 0 && name[name.len - 1] == `!` {
+				name = name[..name.len - 1]
+			}
+			if name == 'del' && expr.args.len > 0 {
+				// Track the base path of del'd array elements
+				base := del_array_base_path(expr.args[0])
+				if base.len > 0 {
+					del_paths[base] = true
+				}
+			}
+		}
+		BinaryExpr {
+			// Check if either operand accesses a del'd array path
+			if expr.op == '+' || expr.op == '-' || expr.op == '*' {
+				if uses_del_path(expr.left[0], del_paths) || uses_del_path(expr.right[0], del_paths) {
+					return error('error[E100]: unhandled error')
+				}
+			}
+			check_del_fallibility(expr.left[0], mut del_paths)!
+			check_del_fallibility(expr.right[0], mut del_paths)!
+		}
+		AssignExpr {
+			// Check the value side for del-affected expressions
+			check_del_fallibility(expr.value[0], mut del_paths)!
+		}
+		IfExpr {
+			if expr.then_block.len > 0 {
+				check_del_fallibility(expr.then_block[0], mut del_paths)!
+			}
+			if expr.else_block.len > 0 {
+				check_del_fallibility(expr.else_block[0], mut del_paths)!
+			}
+		}
+		else {}
+	}
+}
+
+// del_array_base_path extracts the base path from a del() argument like .onk[0].
+// Returns the base path (e.g., ".onk") if the argument is an array-indexed path,
+// or empty string otherwise.
+fn del_array_base_path(expr Expr) string {
+	match expr {
+		PathExpr {
+			// Path like .onk[0] — check if it contains array indexing
+			p := expr.path
+			bracket := p.index('[') or { return '' }
+			if bracket > 0 {
+				return p[..bracket]
+			}
+		}
+		IndexExpr {
+			// IndexExpr where index is numeric — base is expr.expr[0]
+			if expr.expr.len > 0 {
+				base_expr := expr.expr[0]
+				if base_expr is PathExpr {
+					return base_expr.path
+				}
+				if base_expr is IdentExpr {
+					return base_expr.name
+				}
+			}
+		}
+		else {}
+	}
+	return ''
+}
+
+// uses_del_path checks if an expression accesses a path that was targeted by del().
+fn uses_del_path(expr Expr, del_paths map[string]bool) bool {
+	match expr {
+		PathExpr {
+			// Check if this path accesses a del'd array (e.g., .onk[1] when .onk was del'd)
+			p := expr.path
+			bracket := p.index('[') or { return false }
+			if bracket > 0 {
+				base := p[..bracket]
+				return base in del_paths
+			}
+		}
+		IndexExpr {
+			if expr.expr.len > 0 {
+				base_expr := expr.expr[0]
+				if base_expr is PathExpr {
+					return base_expr.path in del_paths
+				}
+				if base_expr is IdentExpr {
+					return base_expr.name in del_paths
+				}
+			}
+		}
+		else {}
+	}
+	return false
 }
