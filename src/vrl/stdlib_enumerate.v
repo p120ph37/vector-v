@@ -1,6 +1,6 @@
 module vrl
 
-import regex.pcre
+import pcre2
 
 // tally(value)
 fn fn_tally(args []VrlValue) !VrlValue {
@@ -73,7 +73,7 @@ fn fn_match_array(args []VrlValue) !VrlValue {
 		}
 		matched := match a1 {
 			VrlRegex {
-				re := pcre.compile(normalize_regex_pattern(a1.pattern)) or { continue }
+				re := pcre2.compile(a1.pattern) or { continue }
 				if _ := re.find(s) { true } else { false }
 			}
 			else { false }

@@ -2,49 +2,8 @@ module vrl
 
 import os
 import math
-import regex.pcre
+import pcre2
 import time
-
-// extract_named_groups parses (?P<name>...) from a regex pattern
-fn extract_named_groups(pattern string) []string {
-	mut names := []string{}
-	mut i := 0
-	mut group_idx := 0
-	for i < pattern.len {
-		if pattern[i] == `\\` {
-			i += 2
-			continue
-		}
-		if pattern[i] == `(` {
-			if i + 3 < pattern.len && pattern[i + 1] == `?` {
-				if pattern[i + 2] == `P` && pattern[i + 3] == `<` {
-					// Named group (?P<name>...)
-					name_start := i + 4
-					mut name_end := name_start
-					for name_end < pattern.len && pattern[name_end] != `>` {
-						name_end++
-					}
-					names << pattern[name_start..name_end]
-					group_idx++
-					i = name_end + 1
-					continue
-				}
-				// Non-capturing group (?:...) or other
-				if pattern[i + 2] != `:` && pattern[i + 2] != `=` && pattern[i + 2] != `!`
-					&& pattern[i + 2] != `<` {
-					// Could be flags like (?i)
-				}
-				i++
-				continue
-			}
-			// Regular capturing group
-			names << ''
-			group_idx++
-		}
-		i++
-	}
-	return names
-}
 
 // parse_regex(value, pattern)
 fn fn_parse_regex(args []VrlValue) !VrlValue {
@@ -71,13 +30,12 @@ fn fn_parse_regex(args []VrlValue) !VrlValue {
 			else {}
 		}
 	}
-	re := pcre.compile(normalize_regex_pattern(pattern)) or {
+	re := pcre2.compile(pattern) or {
 		return error('invalid regex: ${pattern}')
 	}
 	m := re.find(s) or {
 		return error('no match')
 	}
-	names := extract_named_groups(pattern)
 	mut result := new_object_map()
 	if numeric_groups {
 		// Include all numeric groups
@@ -88,8 +46,8 @@ fn fn_parse_regex(args []VrlValue) !VrlValue {
 	}
 	// Always include named groups
 	for i, grp in m.groups {
-		if i < names.len && names[i].len > 0 {
-			result.set(names[i], VrlValue(grp))
+		if i < re.group_names.len && re.group_names[i].len > 0 {
+			result.set(re.group_names[i], VrlValue(grp))
 		}
 	}
 	return VrlValue(result)
@@ -119,10 +77,9 @@ fn fn_parse_regex_all(args []VrlValue) !VrlValue {
 			else {}
 		}
 	}
-	re := pcre.compile(normalize_regex_pattern(pattern)) or {
+	re := pcre2.compile(pattern) or {
 		return error('invalid regex: ${pattern}')
 	}
-	names := extract_named_groups(pattern)
 	mut results := []VrlValue{}
 	mut pos := 0
 	for pos <= s.len {
@@ -139,8 +96,8 @@ fn fn_parse_regex_all(args []VrlValue) !VrlValue {
 			}
 		}
 		for i, grp in m.groups {
-			if i < names.len && names[i].len > 0 {
-				obj.set(names[i], VrlValue(grp))
+			if i < re.group_names.len && re.group_names[i].len > 0 {
+				obj.set(re.group_names[i], VrlValue(grp))
 			}
 		}
 		results << VrlValue(obj)

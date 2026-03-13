@@ -3,34 +3,8 @@ module vrl
 import math
 import os
 import rand
-import regex.pcre
+import pcre2
 import time
-
-// normalize_regex_pattern translates Rust-style regex anchors to PCRE-compatible equivalents.
-// Rust regex uses \A (start of string) and \z (end of string) which V's pcre module doesn't support.
-fn normalize_regex_pattern(pattern string) string {
-	if !pattern.contains('\\A') && !pattern.contains('\\z') {
-		return pattern
-	}
-	mut result := []u8{cap: pattern.len}
-	mut i := 0
-	for i < pattern.len {
-		if i + 1 < pattern.len && pattern[i] == `\\` {
-			if pattern[i + 1] == `A` {
-				result << `^`
-				i += 2
-				continue
-			} else if pattern[i + 1] == `z` {
-				result << `$`
-				i += 2
-				continue
-			}
-		}
-		result << pattern[i]
-		i++
-	}
-	return result.bytestr()
-}
 
 // resolve_named_args evaluates function arguments and resolves named args into a map.
 fn (mut rt Runtime) resolve_named_args(expr FnCallExpr) !([]VrlValue, map[string]VrlValue) {
@@ -1213,7 +1187,7 @@ fn fn_replace(args []VrlValue) !VrlValue {
 			return VrlValue(s.replace(p, replacement))
 		}
 		VrlRegex {
-			re := pcre.compile(normalize_regex_pattern(p.pattern)) or { return VrlValue(s) }
+			re := pcre2.compile(p.pattern) or { return VrlValue(s) }
 			if count == 1 {
 				return VrlValue(re.replace(s, replacement))
 			}
@@ -1266,7 +1240,7 @@ fn split_string_with_limit(s string, delim string, limit int) !VrlValue {
 }
 
 fn split_regex_with_limit(s string, pattern string, limit int) !VrlValue {
-	re := pcre.compile(normalize_regex_pattern(pattern)) or { return error('invalid regex in split') }
+	re := pcre2.compile(pattern) or { return error('invalid regex in split') }
 	mut result := []VrlValue{}
 	mut pos := 0
 	mut count := 0
@@ -1294,7 +1268,7 @@ fn split_regex_with_limit(s string, pattern string, limit int) !VrlValue {
 }
 
 // pcre_replace_all replaces all matches of a pcre regex in a string.
-fn pcre_replace_all(re pcre.Regex, s string, replacement string) string {
+fn pcre_replace_all(re pcre2.Regex, s string, replacement string) string {
 	matches := re.find_all(s)
 	if matches.len == 0 { return s }
 	mut result := []u8{}
@@ -2817,7 +2791,7 @@ fn fn_match(args []VrlValue) !VrlValue {
 		else { return error('match second arg must be regex') }
 	}
 	// Use pcre for matching (supports (?i) and other flags)
-	re := pcre.compile(normalize_regex_pattern(pattern)) or { return error('invalid regex: ${pattern}') }
+	re := pcre2.compile(pattern) or { return error('invalid regex: ${pattern}') }
 	if _ := re.find(s) {
 		return VrlValue(true)
 	}
@@ -2842,7 +2816,7 @@ fn fn_match_any(args []VrlValue) !VrlValue {
 			string { p }
 			else { continue }
 		}
-		re := pcre.compile(normalize_regex_pattern(pat)) or { continue }
+		re := pcre2.compile(pat) or { continue }
 		if _ := re.find(s) {
 			return VrlValue(true)
 		}
@@ -2908,7 +2882,7 @@ fn fn_find(args []VrlValue) !VrlValue {
 	a1v := a1
 	match a1v {
 		VrlRegex {
-			re := pcre.compile(normalize_regex_pattern(a1v.pattern)) or { return VrlValue(VrlNull{}) }
+			re := pcre2.compile(a1v.pattern) or { return VrlValue(VrlNull{}) }
 			if m := re.find(search_str) {
 				return VrlValue(i64(m.start) + from)
 			}

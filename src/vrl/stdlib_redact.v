@@ -1,6 +1,6 @@
 module vrl
 
-import regex.pcre
+import pcre2
 
 // fn_redact implements the VRL redact() function.
 // redact(value, filters) - redacts sensitive data from strings.
@@ -90,7 +90,7 @@ fn redact_apply_filter_type(s string, filter_type string) !string {
 
 // redact_replace replaces all regex matches in s with "[REDACTED]".
 fn redact_replace(s string, pattern string) string {
-	re := pcre.compile(pattern) or { return s }
+	re := pcre2.compile(pattern) or { return s }
 	return pcre_replace_all(re, s, '[REDACTED]')
 }
 
