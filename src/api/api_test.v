@@ -27,12 +27,9 @@ fn test_new_api_ready_custom_address() {
 	assert s.is_ready == true
 }
 
-fn test_send_response_200() {
-	// Verify send_response builds correct HTTP response format
-	// We can't easily test the actual socket write, but we can verify
-	// the function exists and compiles correctly by testing the status
-	// text mapping logic inline
-	status_text := match 200 {
+fn test_send_response_status_text_200() {
+	code := 200
+	status_text := match code {
 		200 { 'OK' }
 		400 { 'Bad Request' }
 		404 { 'Not Found' }
@@ -43,20 +40,54 @@ fn test_send_response_200() {
 	assert status_text == 'OK'
 }
 
-fn test_send_response_status_texts() {
-	// Test all status code mappings used by send_response
-	for pair in [[400, 'Bad Request'], [404, 'Not Found'], [405, 'Method Not Allowed'],
-		[503, 'Service Unavailable']] {
-		status := pair[0].int()
-		expected := pair[1]
-		actual := match status {
-			200 { 'OK' }
-			400 { 'Bad Request' }
-			404 { 'Not Found' }
-			405 { 'Method Not Allowed' }
-			503 { 'Service Unavailable' }
-			else { 'Unknown' }
-		}
-		assert actual == expected
+fn test_send_response_status_text_400() {
+	code := 400
+	actual := match code {
+		200 { 'OK' }
+		400 { 'Bad Request' }
+		404 { 'Not Found' }
+		405 { 'Method Not Allowed' }
+		503 { 'Service Unavailable' }
+		else { 'Unknown' }
 	}
+	assert actual == 'Bad Request'
+}
+
+fn test_send_response_status_text_404() {
+	code := 404
+	actual := match code {
+		200 { 'OK' }
+		400 { 'Bad Request' }
+		404 { 'Not Found' }
+		405 { 'Method Not Allowed' }
+		503 { 'Service Unavailable' }
+		else { 'Unknown' }
+	}
+	assert actual == 'Not Found'
+}
+
+fn test_send_response_status_text_405() {
+	code := 405
+	actual := match code {
+		200 { 'OK' }
+		400 { 'Bad Request' }
+		404 { 'Not Found' }
+		405 { 'Method Not Allowed' }
+		503 { 'Service Unavailable' }
+		else { 'Unknown' }
+	}
+	assert actual == 'Method Not Allowed'
+}
+
+fn test_send_response_status_text_503() {
+	code := 503
+	actual := match code {
+		200 { 'OK' }
+		400 { 'Bad Request' }
+		404 { 'Not Found' }
+		405 { 'Method Not Allowed' }
+		503 { 'Service Unavailable' }
+		else { 'Unknown' }
+	}
+	assert actual == 'Service Unavailable'
 }
