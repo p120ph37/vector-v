@@ -483,6 +483,14 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'md5' { return fn_md5(args) }
 		'hmac' { return fn_hmac(args) }
 		'crc32' { return fn_crc32(args) }
+		'seahash' { return fn_seahash(args) }
+		'xxhash' { return fn_xxhash(args) }
+		'crc' { return fn_crc(args) }
+		// Codec
+		'encode_snappy' { return fn_encode_snappy(args) }
+		'decode_snappy' { return fn_decode_snappy(args) }
+		'encode_lz4' { return fn_encode_lz4(args) }
+		'decode_lz4' { return fn_decode_lz4(args) }
 		// String
 		'camelcase' { return fn_camelcase(args) }
 		'pascalcase' { return fn_pascalcase(args) }
@@ -795,6 +803,13 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'sha1' { return fn_sha1([a0]) }
 			'md5' { return fn_md5([a0]) }
 			'crc32' { return fn_crc32([a0]) }
+			'seahash' { return fn_seahash([a0]) }
+			'xxhash' { return fn_xxhash([a0]) }
+			'crc' { return fn_crc([a0]) }
+			'encode_snappy' { return fn_encode_snappy([a0]) }
+			'decode_snappy' { return fn_decode_snappy([a0]) }
+			'encode_lz4' { return fn_encode_lz4([a0]) }
+			'decode_lz4' { return fn_decode_lz4([a0]) }
 			'parse_float' { return fn_parse_float([a0]) }
 			'tag_types_externally' { return fn_tag_types_externally([a0]) }
 			'tally' { return fn_tally([a0]) }
@@ -944,6 +959,14 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		'md5' { return fn_md5(args) }
 		'hmac' { return fn_hmac(args) }
 		'crc32' { return fn_crc32(args) }
+		'seahash' { return fn_seahash(args) }
+		'xxhash' { return fn_xxhash(args) }
+		'crc' { return fn_crc(args) }
+		// Codec
+		'encode_snappy' { return fn_encode_snappy(args) }
+		'decode_snappy' { return fn_decode_snappy(args) }
+		'encode_lz4' { return fn_encode_lz4(args) }
+		'decode_lz4' { return fn_decode_lz4(args) }
 		// String
 		'camelcase' { return fn_camelcase(args) }
 		'pascalcase' { return fn_pascalcase(args) }
