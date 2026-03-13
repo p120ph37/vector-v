@@ -17,6 +17,18 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
   - `main.v` — Entry point
 - `upstream/` — Upstream Rust source for Vector and VRL (read-only reference)
 
+## Environment Setup
+
+The V compiler (>= 0.4.7) must be installed with clang as the C backend. If missing, install from source:
+
+```bash
+apt-get install -y clang libxxhash-dev libpcre2-dev libsnappy-dev liblz4-dev
+git clone https://github.com/vlang/v /opt/vlang
+cd /opt/vlang && make && ./v -cc clang self
+ln -sf /opt/vlang/v /usr/local/bin/v
+v version  # verify
+```
+
 ## Build & Test
 
 ```bash
@@ -24,7 +36,20 @@ v -enable-globals .              # Build (globals required for PSL cache, UUID c
 v -enable-globals test src/vrl/  # Run VRL tests
 v -enable-globals test src/      # Run all tests
 make build                       # Build via Makefile
+make test-all                    # Run all test modules
 make test-vrl                    # VRL tests via Makefile
+```
+
+## Code Coverage
+
+Uses V's built-in `-coverage` instrumentation (available since V 0.4.7). The compiler inserts statement-level counters during C codegen, and `v cover` produces per-file line coverage reports.
+
+```bash
+make coverage                                    # Run with default 95% threshold
+./scripts/runtime_coverage.sh --threshold 90     # Custom threshold
+./scripts/runtime_coverage.sh --verbose          # Detailed output
+./scripts/runtime_coverage.sh --filter transforms # Filter report by module
+make coverage-clean                              # Remove .coverage/ artifacts
 ```
 
 ## Implemented Components
