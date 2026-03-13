@@ -1,6 +1,6 @@
 .PHONY: build test test-vrl test-all clean run-demo bench bench-v bench-rust \
        coverage coverage-json coverage-verbose \
-       coverage-runtime coverage-gcov coverage-clean
+       coverage-runtime coverage-clean
 
 build:
 	v -enable-globals -o vector-v src/
@@ -34,10 +34,7 @@ coverage-verbose:
 	@python3 scripts/coverage.py --src src --verbose
 
 coverage-runtime:
-	@./scripts/runtime_coverage.sh --method native
-
-coverage-gcov:
-	@./scripts/runtime_coverage.sh --method gcov --html
+	@./scripts/runtime_coverage.sh
 
 coverage-clean:
 	rm -rf .coverage/
