@@ -17,3 +17,9 @@ bench/v-vrl/bench_*
 src/vrl/conformance_test
 src/vrl/vrl.so
 *.so
+
+# Coverage artifacts
+.coverage/
+*.gcda
+*.gcno
+*.gcov
