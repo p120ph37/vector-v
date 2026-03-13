@@ -90,6 +90,72 @@ fn type_from_value(v VrlValue) ObjectMap {
 	return m
 }
 
+// abstractify_arrays converts concrete indexed array types to array_unknown_infinite.
+// Used for type_def when no tracked type is available (e.g. closure variables),
+// because the runtime value has concrete indices but the static type should be abstract.
+fn abstractify_arrays(t ObjectMap) ObjectMap {
+	mut result := new_object_map()
+	for k in t.keys() {
+		val := t.get(k) or { continue }
+		if k == 'array' {
+			v := val
+			match v {
+				ObjectMap {
+					// Convert concrete indexed array to array_unknown_infinite
+					result.set('array', VrlValue(new_object_map()))
+					if v.len() > 0 {
+						keys := v.keys()
+						mut elem_type := new_object_map()
+						for ek in keys {
+							if ev := v.get(ek) {
+								ev2 := ev
+								match ev2 {
+									ObjectMap {
+										elem_type = type_union(elem_type, ev2)
+									}
+									else {}
+								}
+							}
+						}
+						elem_type.set('undefined', VrlValue(true))
+						result.set('array_unknown_infinite', VrlValue(elem_type))
+					}
+				}
+				else {
+					result.set(k, val)
+				}
+			}
+		} else if k == 'object' {
+			v := val
+			match v {
+				ObjectMap {
+					// Recursively abstractify array fields in objects
+					mut inner := new_object_map()
+					for fk in v.keys() {
+						fv := v.get(fk) or { continue }
+						fv2 := fv
+						match fv2 {
+							ObjectMap {
+								inner.set(fk, VrlValue(abstractify_arrays(fv2)))
+							}
+							else {
+								inner.set(fk, fv)
+							}
+						}
+					}
+					result.set('object', VrlValue(inner))
+				}
+				else {
+					result.set(k, val)
+				}
+			}
+		} else {
+			result.set(k, val)
+		}
+	}
+	return result
+}
+
 // type_union merges two type ObjectMaps, combining all possible types.
 fn type_union(a ObjectMap, b ObjectMap) ObjectMap {
 	// If either side is "any", the union is "any"

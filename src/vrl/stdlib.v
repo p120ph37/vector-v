@@ -1541,7 +1541,9 @@ fn (mut rt Runtime) resolve_type_def(arg Expr) ObjectMap {
 			if tracked := rt.type_vars[arg.name] {
 				return type_union(runtime_type, tracked)
 			}
-			return runtime_type
+			// No tracked type — variable came from untracked context (e.g. closure param).
+			// Use abstract array types since we don't know the static schema.
+			return abstractify_arrays(runtime_type)
 		}
 		PathExpr {
 			// Get runtime value type
