@@ -382,6 +382,18 @@ fn (mut rt Runtime) eval_fn_call_named(name string, expr FnCallExpr) !VrlValue {
 			unit := VrlValue(get_named_string(named, 'measurement_unit', 'kilometers'))
 			return fn_haversine([pos[0], pos[1], pos[2], pos[3], unit])
 		}
+		'community_id' {
+			return fn_community_id(pos, named)
+		}
+		'dns_lookup' {
+			return fn_dns_lookup(pos, named)
+		}
+		'encode_charset' {
+			return fn_encode_charset(pos, named)
+		}
+		'decode_charset' {
+			return fn_decode_charset(pos, named)
+		}
 		else {
 			// Fallback: pass all positional args to the general dispatch
 			mut all_args := pos.clone()
@@ -571,6 +583,14 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'redact' { return fn_redact(args) }
 		'match_datadog_query' { return fn_match_datadog_query(args) }
 		'parse_grok' { return fn_parse_grok(args) }
+		// IP binary
+		'ip_ntop' { return fn_ip_ntop(args) }
+		'ip_pton' { return fn_ip_pton(args) }
+		// DNS
+		'reverse_dns' { return fn_reverse_dns(args) }
+		// Misc
+		'uuid_from_friendly_id' { return fn_uuid_from_friendly_id(args) }
+		'validate_json_schema' { return fn_validate_json_schema(args) }
 		else { return error('unknown function: ${name}') }
 	}
 }
@@ -660,6 +680,10 @@ fn fn_valid_keywords(name string) []string {
 		'parse_grok' { ['value', 'pattern'] }
 		'parse_etld' { ['value', 'plus_parts', 'psl'] }
 		'parse_aws_cloudwatch_log_subscription_message' { ['value'] }
+		'community_id' { ['source_ip', 'destination_ip', 'protocol', 'source_port', 'destination_port', 'seed'] }
+		'dns_lookup' { ['value'] }
+		'encode_charset' { ['value', 'to_charset'] }
+		'decode_charset' { ['value', 'from_charset'] }
 		else { []string{} }
 	}
 }
