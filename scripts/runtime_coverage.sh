@@ -106,14 +106,19 @@ v cover $cover_flags "$COV_DIR/" | tee "$COV_DIR/report.txt"
 
 # Parse overall coverage from the pipe-delimited vcover output
 #   file | executed | total | pct%
+# Only count project source files (src/), skip V standard library files
 total_executed=0
 total_points=0
-while IFS='|' read -r _file executed points _pct; do
+while IFS='|' read -r file executed points _pct; do
+    file=$(echo "$file" | tr -d ' ')
     executed=$(echo "$executed" | tr -d ' ')
     points=$(echo "$points" | tr -d ' ')
     if [[ "$executed" =~ ^[0-9]+$ ]] && [[ "$points" =~ ^[0-9]+$ ]]; then
-        total_executed=$((total_executed + executed))
-        total_points=$((total_points + points))
+        # Skip V standard library and non-project files
+        if [[ "$file" == src/* ]] || [[ "$file" == */src/* ]]; then
+            total_executed=$((total_executed + executed))
+            total_points=$((total_points + points))
+        fi
     fi
 done < "$COV_DIR/report.txt"
 

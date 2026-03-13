@@ -17,9 +17,10 @@ fn test_reduce_merge_strategy_sum() {
 
 	flushed := t.flush_all()
 	assert flushed.len == 1
-	match flushed[0] {
+	first := flushed[0]
+	match first {
 		event.LogEvent {
-			val := flushed[0].get('count') or { panic('expected count') }
+			val := first.get('count') or { panic('expected count') }
 			assert event.value_to_string(val) == '30'
 		}
 		else {
@@ -43,9 +44,10 @@ fn test_reduce_merge_strategy_min() {
 
 	flushed := t.flush_all()
 	assert flushed.len == 1
-	match flushed[0] {
+	first := flushed[0]
+	match first {
 		event.LogEvent {
-			val := flushed[0].get('val') or { panic('expected val') }
+			val := first.get('val') or { panic('expected val') }
 			assert event.value_to_string(val) == '10'
 		}
 		else {
@@ -69,9 +71,10 @@ fn test_reduce_merge_strategy_max() {
 
 	flushed := t.flush_all()
 	assert flushed.len == 1
-	match flushed[0] {
+	first := flushed[0]
+	match first {
 		event.LogEvent {
-			val := flushed[0].get('val') or { panic('expected val') }
+			val := first.get('val') or { panic('expected val') }
 			assert event.value_to_string(val) == '100'
 		}
 		else {
@@ -95,9 +98,10 @@ fn test_reduce_merge_strategy_concat() {
 
 	flushed := t.flush_all()
 	assert flushed.len == 1
-	match flushed[0] {
+	first := flushed[0]
+	match first {
 		event.LogEvent {
-			val := flushed[0].get('msg') or { panic('expected msg') }
+			val := first.get('msg') or { panic('expected msg') }
 			s := event.value_to_string(val)
 			assert s.contains('hello')
 			assert s.contains('world')

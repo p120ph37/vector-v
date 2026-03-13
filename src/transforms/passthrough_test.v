@@ -6,9 +6,10 @@ fn test_passthrough_returns_same_event() {
 	ev := event.Event(event.new_log('hello'))
 	result := passthrough(ev) or { panic(err) }
 	assert result.len == 1
-	match result[0] {
+	first := result[0]
+	match first {
 		event.LogEvent {
-			assert result[0].message() == 'hello'
+			assert first.message() == 'hello'
 		}
 		else {
 			assert false, 'expected LogEvent'
