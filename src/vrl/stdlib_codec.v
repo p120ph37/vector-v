@@ -671,6 +671,134 @@ fn fn_decode_zstd(args []VrlValue) !VrlValue {
 	return fn_decode_zstd_streaming(data)
 }
 
+// Snappy C bindings
+#flag -lsnappy
+#include <snappy-c.h>
+fn C.snappy_compress(input &u8, input_length usize, compressed &u8, compressed_length &usize) int
+fn C.snappy_uncompress(compressed &u8, compressed_length usize, uncompressed &u8, uncompressed_length &usize) int
+fn C.snappy_max_compressed_length(source_length usize) usize
+fn C.snappy_uncompressed_length(compressed &u8, compressed_length usize, result &usize) int
+
+// LZ4 C bindings
+#flag -llz4
+#include <lz4.h>
+fn C.LZ4_compressBound(input_size int) int
+fn C.LZ4_compress_default(src &u8, dst &u8, src_size int, dst_capacity int) int
+fn C.LZ4_decompress_safe(src &u8, dst &u8, compressed_size int, dst_capacity int) int
+
+// encode_snappy(value) - Compress string using Snappy
+fn fn_encode_snappy(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('encode_snappy requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('encode_snappy requires a string') }
+	}
+	data := s.bytes()
+	max_len := C.snappy_max_compressed_length(usize(data.len))
+	mut compressed := []u8{len: int(max_len)}
+	mut out_len := max_len
+	rc := C.snappy_compress(data.data, usize(data.len), compressed.data, &out_len)
+	if rc != 0 {
+		return error('snappy compression failed')
+	}
+	return VrlValue(compressed[..int(out_len)].bytestr())
+}
+
+// decode_snappy(value) - Decompress Snappy bytes into original string
+fn fn_decode_snappy(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('decode_snappy requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('decode_snappy requires a string') }
+	}
+	data := s.bytes()
+	mut uncompressed_len := usize(0)
+	rc1 := C.snappy_uncompressed_length(data.data, usize(data.len), &uncompressed_len)
+	if rc1 != 0 {
+		return error('snappy decompression failed: invalid input')
+	}
+	mut output := []u8{len: int(uncompressed_len)}
+	rc2 := C.snappy_uncompress(data.data, usize(data.len), output.data, &uncompressed_len)
+	if rc2 != 0 {
+		return error('snappy decompression failed')
+	}
+	return VrlValue(output[..int(uncompressed_len)].bytestr())
+}
+
+// encode_lz4(value, [prepend_size]) - Compress string using LZ4 block format
+// prepend_size defaults to true (matching upstream lz4_flex compress_prepend_size)
+fn fn_encode_lz4(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('encode_lz4 requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('encode_lz4 requires a string') }
+	}
+	prepend_size := if args.len > 1 { get_bool_arg(args[1], true) } else { true }
+	data := s.bytes()
+	max_len := C.LZ4_compressBound(data.len)
+	if max_len <= 0 {
+		return error('lz4 compression failed: input too large')
+	}
+	mut compressed := []u8{len: max_len}
+	out_len := C.LZ4_compress_default(data.data, compressed.data, data.len, max_len)
+	if out_len <= 0 {
+		return error('lz4 compression failed')
+	}
+	if prepend_size {
+		// Prepend 4-byte little-endian original size
+		size_le := [u8(data.len & 0xFF), u8((data.len >> 8) & 0xFF),
+			u8((data.len >> 16) & 0xFF), u8((data.len >> 24) & 0xFF)]
+		mut result := []u8{cap: 4 + out_len}
+		result << size_le
+		result << compressed[..out_len]
+		return VrlValue(result.bytestr())
+	}
+	return VrlValue(compressed[..out_len].bytestr())
+}
+
+// decode_lz4(value, [buf_size, prepended_size]) - Decompress LZ4 block into original string
+fn fn_decode_lz4(args []VrlValue) !VrlValue {
+	if args.len < 1 {
+		return error('decode_lz4 requires 1 argument')
+	}
+	a := args[0]
+	s := match a {
+		string { a }
+		else { return error('decode_lz4 requires a string') }
+	}
+	buf_size_arg := if args.len > 1 { get_int_arg(args[1], 0) } else { 0 }
+	prepended_size := if args.len > 2 { get_bool_arg(args[2], true) } else { true }
+	data := s.bytes()
+
+	mut src_offset := 0
+	mut out_size := buf_size_arg
+
+	if prepended_size && data.len >= 4 {
+		out_size = int(u32(data[0]) | (u32(data[1]) << 8) | (u32(data[2]) << 16) | (u32(data[3]) << 24))
+		src_offset = 4
+	}
+
+	if out_size <= 0 {
+		out_size = 1000000
+	}
+
+	mut output := []u8{len: out_size}
+	out_len := C.LZ4_decompress_safe(unsafe { &u8(data.data) + src_offset }, output.data, data.len - src_offset, out_size)
+	if out_len >= 0 {
+		return VrlValue(output[..out_len].bytestr())
+	}
+	return error('lz4 decompression failed')
+}
+
 fn fn_decode_zstd_streaming(data []u8) !VrlValue {
 	mut dctx := zstd.new_dctx() or {
 		return error('zstd decompression failed: failed to create context')
