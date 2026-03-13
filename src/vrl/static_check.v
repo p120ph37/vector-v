@@ -159,7 +159,142 @@ fn is_expr_fallible(expr Expr) bool {
 // Returns an error if any static violation is found.
 fn static_check(expr Expr) ! {
 	sc_walk(expr, false)!
+	// E642: check parent path type mismatches (variable type tracking)
+	mut var_types := map[string]string{} // var name -> simple type
+	check_e642(expr, mut var_types)!
 }
+
+// check_e642 walks the AST tracking variable types and checking for
+// assignments where the parent path resolves to an incompatible type.
+// e.g., foo = "string"; foo.bar = {} → E642 (string has no fields)
+// e.g., foo = "string"; foo[0] = [] → E642 (string is not an array)
+fn check_e642(expr Expr, mut var_types map[string]string) ! {
+	match expr {
+		BlockExpr {
+			for e in expr.exprs {
+				check_e642(e, mut var_types)!
+			}
+		}
+		AssignExpr {
+			target := expr.target[0]
+			value := expr.value[0]
+			// Check if target is a compound path into a typed variable
+			check_e642_target(target, var_types)!
+			// Track the type of the assignment target
+			e642_track_assign(target, value, mut var_types)
+		}
+		IfExpr {
+			if expr.then_block.len > 0 {
+				check_e642(expr.then_block[0], mut var_types)!
+			}
+			if expr.else_block.len > 0 {
+				check_e642(expr.else_block[0], mut var_types)!
+			}
+		}
+		else {}
+	}
+}
+
+// check_e642_target checks if an assignment target's parent path has an incompatible type.
+fn check_e642_target(target Expr, var_types map[string]string) ! {
+	match target {
+		IndexExpr {
+			// Assignment like foo[0] = val or foo.bar = val
+			// The parent is target.expr[0], the segment is target.index[0]
+			parent := target.expr[0]
+			idx := target.index[0]
+			// Get the parent's type
+			parent_type := e642_resolve_type(parent, var_types)
+			if parent_type.len > 0 {
+				// Check: indexing with integer into non-array
+				if idx is LiteralExpr {
+					iv := idx.value
+					if iv is i64 {
+						if parent_type != 'array' && parent_type != 'object' && parent_type != 'any' && parent_type != '' {
+							return error('error[E642]: parent path segment rejects this mutation')
+						}
+					} else if iv is string {
+						// Field access like foo.bar (parsed as IndexExpr with string literal)
+						if parent_type != 'object' && parent_type != 'any' && parent_type != '' {
+							return error('error[E642]: parent path segment rejects this mutation')
+						}
+					}
+				}
+			}
+			// Also check nested: foo.bar.baz — recurse on parent
+			check_e642_target(parent, var_types)!
+		}
+		PathExpr {
+			path := target.path
+			// Compound paths like .bar where . is known to be non-object
+			if path != '.' && path.starts_with('.') {
+				// Parent is root "."
+				if root_type := var_types['.'] {
+					if root_type != 'object' && root_type != 'any' && root_type != '' {
+						return error('error[E642]: parent path segment rejects this mutation')
+					}
+					// If root IS an object, check nested fields
+					// e.g., . = {"foo": true}; .foo.bar = "bar"
+					// .foo is boolean, so .foo.bar should fail
+					parts := path[1..].split('.')
+					if parts.len > 1 {
+						parent_path := '.${parts[0]}'
+						if pt := var_types[parent_path] {
+							if pt != 'object' && pt != 'any' && pt != '' {
+								return error('error[E642]: parent path segment rejects this mutation')
+							}
+						}
+					}
+				}
+			}
+		}
+		else {}
+	}
+}
+
+// e642_resolve_type returns the known type of an expression from the variable tracking.
+fn e642_resolve_type(expr Expr, var_types map[string]string) string {
+	match expr {
+		IdentExpr {
+			return var_types[expr.name] or { '' }
+		}
+		PathExpr {
+			return var_types[expr.path] or { '' }
+		}
+		IndexExpr {
+			// Nested — the type is unknown unless we track deeply
+			return ''
+		}
+		else { return '' }
+	}
+}
+
+// e642_track_assign records the type of a variable after an assignment.
+fn e642_track_assign(target Expr, value Expr, mut var_types map[string]string) {
+	match target {
+		IdentExpr {
+			var_types[target.name] = sc_infer_simple_type(value)
+		}
+		PathExpr {
+			t := sc_infer_simple_type(value)
+			var_types[target.path] = t
+			// If assigning to root and value is an object literal, track fields
+			if target.path == '.' {
+				if value is ObjectExpr {
+					var_types['.'] = 'object'
+					for pair in value.pairs {
+						ft := sc_infer_simple_type(pair.value)
+						if ft.len > 0 {
+							var_types['.${pair.key}'] = ft
+						}
+					}
+				}
+			}
+		}
+		else {}
+	}
+}
+
 
 // sc_walk recursively walks the AST checking for static errors.
 // `handled` is true when the current expression's errors are being caught
@@ -388,6 +523,12 @@ fn sc_is_known_non_string(expr Expr) bool {
 // execute_checked compiles and runs a VRL program with static analysis.
 // Returns compile-time errors before execution if any violations are found.
 pub fn execute_checked(source string, obj map[string]VrlValue) !VrlValue {
+	return execute_checked_with_readonly(source, obj, []string{}, []string{}, []string{})
+}
+
+// execute_checked_with_readonly compiles and runs a VRL program with static analysis
+// and read-only path enforcement.
+pub fn execute_checked_with_readonly(source string, obj map[string]VrlValue, ro_paths []string, ro_rec_paths []string, ro_meta_paths []string) !VrlValue {
 	mut lex := new_lexer(source)
 	tokens := lex.tokenize()
 	if lex.errors.len > 0 {
@@ -396,6 +537,87 @@ pub fn execute_checked(source string, obj map[string]VrlValue) !VrlValue {
 	mut parser := new_parser(tokens)
 	ast := parser.parse()!
 	static_check(ast)!
+	if ro_paths.len > 0 || ro_rec_paths.len > 0 || ro_meta_paths.len > 0 {
+		check_read_only(ast, ro_paths, ro_rec_paths, ro_meta_paths)!
+	}
 	mut rt := new_runtime_with_object(obj)
 	return rt.eval(ast)
+}
+
+// check_read_only walks the AST and checks for assignments to read-only paths.
+// Returns E315 if any read-only path is mutated.
+fn check_read_only(expr Expr, ro_paths []string, ro_rec_paths []string, ro_meta_paths []string) ! {
+	match expr {
+		BlockExpr {
+			for e in expr.exprs {
+				check_read_only(e, ro_paths, ro_rec_paths, ro_meta_paths)!
+			}
+		}
+		AssignExpr {
+			check_read_only_target(expr.target[0], ro_paths, ro_rec_paths, ro_meta_paths)!
+			check_read_only(expr.value[0], ro_paths, ro_rec_paths, ro_meta_paths)!
+		}
+		MergeAssignExpr {
+			check_read_only_target(expr.target[0], ro_paths, ro_rec_paths, ro_meta_paths)!
+			check_read_only(expr.value[0], ro_paths, ro_rec_paths, ro_meta_paths)!
+		}
+		OkErrAssignExpr {
+			check_read_only_target(expr.ok_target[0], ro_paths, ro_rec_paths, ro_meta_paths)!
+			check_read_only(expr.value[0], ro_paths, ro_rec_paths, ro_meta_paths)!
+		}
+		IfExpr {
+			check_read_only(expr.condition[0], ro_paths, ro_rec_paths, ro_meta_paths)!
+			if expr.then_block.len > 0 {
+				check_read_only(expr.then_block[0], ro_paths, ro_rec_paths, ro_meta_paths)!
+			}
+			if expr.else_block.len > 0 {
+				check_read_only(expr.else_block[0], ro_paths, ro_rec_paths, ro_meta_paths)!
+			}
+		}
+		else {}
+	}
+}
+
+// check_read_only_target checks if an assignment target is a read-only path.
+fn check_read_only_target(target Expr, ro_paths []string, ro_rec_paths []string, ro_meta_paths []string) ! {
+	match target {
+		PathExpr {
+			path := target.path
+			// Root path "." — if any read-only path exists, root mutation is forbidden
+			if path == '.' {
+				if ro_paths.len > 0 || ro_rec_paths.len > 0 {
+					return error('error[E315]: mutation of read-only value')
+				}
+			}
+			// Check exact match against read_only paths
+			for ro in ro_paths {
+				if path == ro {
+					return error('error[E315]: mutation of read-only value')
+				}
+			}
+			// Check prefix match against read_only_recursive paths
+			for ro in ro_rec_paths {
+				if path == ro || path.starts_with('${ro}.') || path.starts_with('${ro}[') {
+					return error('error[E315]: mutation of read-only value')
+				}
+			}
+		}
+		MetaPathExpr {
+			// Normalize: strip leading % from path
+			raw_path := target.path
+			clean_path := if raw_path.starts_with('%') { raw_path[1..] } else { raw_path }
+			for ro in ro_meta_paths {
+				// Normalize: strip leading . or % from the read_only spec
+				clean_ro := if ro.starts_with('.') { ro[1..] } else if ro.starts_with('%') { ro[1..] } else { ro }
+				if clean_path == clean_ro {
+					return error('error[E315]: mutation of read-only value')
+				}
+			}
+		}
+		IndexExpr {
+			// For indexed assignments like foo[0], check the base
+			check_read_only_target(target.expr[0], ro_paths, ro_rec_paths, ro_meta_paths)!
+		}
+		else {}
+	}
 }

@@ -190,7 +190,8 @@ pub fn (mut rt Runtime) eval(expr Expr) !VrlValue {
 fn (mut rt Runtime) eval_ok_err_assign(expr OkErrAssignExpr) !VrlValue {
 	// Evaluate the expression; if it errors, assign default to ok and error string to err
 	val := rt.eval(expr.value[0]) or {
-		err_msg := err.msg()
+		raw_msg := err.msg()
+		err_msg := fn_call_error_msg(expr.value[0], raw_msg)
 		// Determine a type-appropriate default for ok value
 		ok_default := ok_err_default_value(expr.value[0])
 		rt.assign_to(expr.ok_target[0], ok_default)
@@ -214,6 +215,30 @@ fn (mut rt Runtime) eval_ok_err_assign(expr OkErrAssignExpr) !VrlValue {
 // ok_err_default_value returns the type-appropriate default for an expression's ok value.
 // Division always returns float, so default to 0.0. Function calls that return known types
 // can be mapped here. Otherwise, return null.
+// fn_call_error_msg wraps a raw error message with function call context if the
+// expression is a FnCallExpr. Matches Rust VRL's error format.
+fn fn_call_error_msg(expr Expr, raw_msg string) string {
+	if expr is FnCallExpr {
+		mut name := expr.name
+		if name.len > 0 && name[name.len - 1] == `!` {
+			name = name[..name.len - 1]
+		}
+		return 'function call error for "${name}": ${raw_msg}'
+	}
+	// Recurse into wrapper expressions to find the underlying FnCallExpr
+	if expr is IndexExpr {
+		if expr.expr.len > 0 {
+			return fn_call_error_msg(expr.expr[0], raw_msg)
+		}
+	}
+	if expr is CoalesceExpr {
+		if expr.expr.len > 0 {
+			return fn_call_error_msg(expr.expr[0], raw_msg)
+		}
+	}
+	return raw_msg
+}
+
 fn ok_err_default_value(expr Expr) VrlValue {
 	if expr is BinaryExpr {
 		if expr.op == '/' {

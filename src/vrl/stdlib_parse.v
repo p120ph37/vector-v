@@ -1852,7 +1852,7 @@ fn fn_parse_syslog(args []VrlValue) !VrlValue {
 		else { return error('parse_syslog requires a string') }
 	}
 	if s.len < 3 || s[0] != `<` {
-		return error('parse_syslog: expected <priority>')
+		return error('unable to parse input as valid syslog message')
 	}
 
 	// Parse priority: <NNN>
@@ -1861,7 +1861,7 @@ fn fn_parse_syslog(args []VrlValue) !VrlValue {
 		i++
 	}
 	if i >= s.len {
-		return error('parse_syslog: unterminated priority')
+		return error('unable to parse input as valid syslog message')
 	}
 	pri_str := s[1..i]
 	priority := pri_str.int()
