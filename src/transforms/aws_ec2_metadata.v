@@ -14,6 +14,10 @@ import time
 // DIVERGENCE FROM UPSTREAM: Simplified to fetch a fixed set of common
 // fields. Does not support custom instance tags or IAM role arrays.
 // Uses periodic re-fetch rather than lock-free ArcSwap.
+//
+// If the initial metadata fetch fails (and required=false), subsequent
+// refresh attempts are skipped entirely — we assume the process is not
+// running in an EC2 environment.
 pub struct Ec2MetadataTransform {
 	namespace    string
 	fields       []string
@@ -22,6 +26,7 @@ pub struct Ec2MetadataTransform {
 mut:
 	values       map[string]string
 	last_refresh time.Time
+	ec2_unavail  bool // set once IMDS is unreachable; disables further fetches
 }
 
 const ec2_default_endpoint = 'http://169.254.169.254'
@@ -63,11 +68,14 @@ pub fn new_ec2_metadata(opts map[string]string) !Ec2MetadataTransform {
 	refresh_interval := if refresh_secs > 0 { refresh_secs } else { 10 }
 
 	// Do initial fetch
+	mut ec2_unavail := false
 	initial := fetch_all_metadata(endpoint, fields) or {
 		required := opts['required'] or { 'true' }
 		if required == 'true' {
 			return error('ec2_metadata: failed to fetch metadata: ${err}')
 		}
+		// Not in EC2 — mark unavailable so we never retry
+		ec2_unavail = true
 		map[string]string{}
 	}
 
@@ -78,6 +86,7 @@ pub fn new_ec2_metadata(opts map[string]string) !Ec2MetadataTransform {
 		refresh_secs: refresh_interval
 		values: initial.clone()
 		last_refresh: time.now()
+		ec2_unavail: ec2_unavail
 	}
 }
 
@@ -182,19 +191,25 @@ fn fetch_all_metadata(endpoint string, fields []string) !map[string]string {
 	return result
 }
 
+// imds_timeout is the HTTP read/write timeout for all IMDS requests.
+// 1 second is sufficient — the metadata service is on the local link.
+const imds_timeout = i64(1 * time.second)
+
 fn fetch_imds_token(endpoint string) !string {
 	mut header := http.new_custom_header_from_map({
 		'X-aws-ec2-metadata-token-ttl-seconds': '21600'
 	})!
 
-	config := http.FetchConfig{
+	mut req := http.prepare(http.FetchConfig{
 		url: '${endpoint}/latest/api/token'
 		method: .put
 		header: header
 		verbose: false
-	}
+	})!
+	req.read_timeout = transforms.imds_timeout
+	req.write_timeout = transforms.imds_timeout
 
-	resp := http.fetch(config) or {
+	resp := req.do() or {
 		return error('failed to get IMDSv2 token: ${err}')
 	}
 	if resp.status_code != 200 {
@@ -208,14 +223,16 @@ fn fetch_metadata_path(endpoint string, path string, token string) !string {
 		'X-aws-ec2-metadata-token': token
 	})!
 
-	config := http.FetchConfig{
+	mut req := http.prepare(http.FetchConfig{
 		url: '${endpoint}${path}'
 		method: .get
 		header: header
 		verbose: false
-	}
+	})!
+	req.read_timeout = transforms.imds_timeout
+	req.write_timeout = transforms.imds_timeout
 
-	resp := http.fetch(config) or {
+	resp := req.do() or {
 		return error('metadata fetch failed: ${err}')
 	}
 	if resp.status_code == 404 {
@@ -247,9 +264,13 @@ fn parse_identity_document(body string) map[string]string {
 // transform enriches an event with cached EC2 metadata.
 // Refreshes metadata if the cache has expired.
 pub fn (mut t Ec2MetadataTransform) transform(e event.Event) ![]event.Event {
-	// Refresh if stale
-	if time.since(t.last_refresh) > time.Duration(i64(t.refresh_secs) * 1_000_000_000) {
-		new_values := fetch_all_metadata(t.endpoint, t.fields) or { t.values.clone() }
+	// Refresh if stale — but skip entirely if IMDS was already unreachable
+	if !t.ec2_unavail && time.since(t.last_refresh) > time.Duration(i64(t.refresh_secs) * 1_000_000_000) {
+		new_values := fetch_all_metadata(t.endpoint, t.fields) or {
+			// First refresh failure means we're not on EC2; stop trying
+			t.ec2_unavail = true
+			t.values.clone()
+		}
 		t.values = new_values.clone()
 		t.last_refresh = time.now()
 	}

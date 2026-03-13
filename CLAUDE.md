@@ -111,3 +111,5 @@ We implement a minimal msgpack decoder directly in V rather than depending on an
 ### EC2 Metadata: Synchronous refresh (diverges from upstream)
 
 Upstream uses `ArcSwap` for lock-free atomic metadata updates via a background task. Our implementation refreshes metadata lazily during `transform()` when the cache expires, avoiding the complexity of V's shared memory primitives. This is simpler but means the first event after a refresh interval may see slightly higher latency.
+
+All IMDS HTTP requests use a 1-second timeout (the metadata service is on the local link). If a fetch fails once, `ec2_unavail` is set and all subsequent refresh attempts are skipped — in non-EC2 environments there is no point retrying.
