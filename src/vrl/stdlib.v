@@ -728,14 +728,14 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 				v := a0
 				match v {
 					string { return VrlValue(v.to_lower()) }
-					else { return error('downcase requires a string argument') }
+					else { return error('expected string, got ${vrl_type_name(v)}') }
 				}
 			}
 			'upcase' {
 				v := a0
 				match v {
 					string { return VrlValue(v.to_upper()) }
-					else { return error('upcase requires a string argument') }
+					else { return error('expected string, got ${vrl_type_name(v)}') }
 				}
 			}
 			'to_string' { return fn_to_string([a0]) }
@@ -1047,7 +1047,7 @@ fn fn_downcase(args []VrlValue) !VrlValue {
 	a := args[0]
 	match a {
 		string { return VrlValue(a.to_lower()) }
-		else { return error('downcase requires a string argument') }
+		else { return error('expected string, got ${vrl_type_name(a)}') }
 	}
 }
 
@@ -1056,7 +1056,7 @@ fn fn_upcase(args []VrlValue) !VrlValue {
 	a := args[0]
 	match a {
 		string { return VrlValue(a.to_upper()) }
-		else { return error('upcase requires a string argument') }
+		else { return error('expected string, got ${vrl_type_name(a)}') }
 	}
 }
 
@@ -1560,15 +1560,9 @@ fn (mut rt Runtime) resolve_type_def(arg Expr) ObjectMap {
 			return result
 		}
 		BlockExpr {
-			// Evaluate the block at runtime and use the actual result type
-			val := rt.eval(arg) or { return rt.infer_type(arg) }
-			runtime_type := type_from_value(val)
-			// Union with static inference to capture error/alternative paths
-			static_type := rt.infer_type(arg)
-			if static_type.len() > 0 {
-				return type_union(runtime_type, static_type)
-			}
-			return runtime_type
+			// Use only static inference for blocks — runtime eval would
+			// trigger abort/return side effects that corrupt interpreter state.
+			return rt.infer_type(arg)
 		}
 		else {
 			// For function calls, etc. use static inference
