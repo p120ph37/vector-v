@@ -202,8 +202,3 @@ fn iconv_convert(input []u8, from string, to string) !VrlValue {
 	return VrlValue(out_buf[..converted_len].bytestr())
 }
 
-// validate_json_schema — not implemented (requires JSON Schema validator library).
-// Placeholder that returns an informative error.
-fn fn_validate_json_schema(args []VrlValue) !VrlValue {
-	return error('validate_json_schema is not implemented in this runtime')
-}
