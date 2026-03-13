@@ -1,6 +1,5 @@
 .PHONY: build test test-vrl test-all clean run-demo bench bench-v bench-rust \
-       coverage coverage-json coverage-verbose \
-       coverage-runtime coverage-clean
+       coverage coverage-clean
 
 build:
 	v -enable-globals -o vector-v src/
@@ -25,15 +24,6 @@ test-all:
 	v -enable-globals test src/vrl/
 
 coverage:
-	@python3 scripts/coverage.py --src src
-
-coverage-json:
-	@python3 scripts/coverage.py --src src --json
-
-coverage-verbose:
-	@python3 scripts/coverage.py --src src --verbose
-
-coverage-runtime:
 	@./scripts/runtime_coverage.sh
 
 coverage-clean:
