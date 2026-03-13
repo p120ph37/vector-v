@@ -1,8 +1,9 @@
-// Wrapper implementation that includes the real xxhash.h and delegates.
-// Compiled into libxxhash.a alongside the xxhash implementation itself.
-// This isolates our code from V's bundled zstd XXH_NAMESPACE pollution.
+// Wrapper implementation that includes the system xxhash.h and delegates.
+// Compiled into a small static lib to isolate our code from V's bundled
+// zstd XXH_NAMESPACE pollution.
+// Requires: libxxhash-dev (apt install libxxhash-dev)
 #define XXH_STATIC_LINKING_ONLY
-#include "xxhash.h"
+#include <xxhash.h>
 #include "xxhash_wrapper.h"
 
 uint32_t vectorv_xxh32(const void* input, size_t length, uint32_t seed) {
