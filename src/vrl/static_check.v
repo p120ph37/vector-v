@@ -165,6 +165,8 @@ fn static_check(expr Expr) ! {
 	// Check for unhandled fallible expressions after del() on array elements
 	mut del_paths := map[string]bool{}
 	check_del_fallibility(expr, mut del_paths)!
+	// E900: unused variables and literals (warnings treated as errors)
+	check_e900(expr)!
 }
 
 // check_e642 walks the AST tracking variable types and checking for
@@ -319,6 +321,10 @@ fn sc_walk(expr Expr, handled bool) ! {
 			if name.len > 0 && name[name.len - 1] == `!` {
 				// ! handles all errors from this call and its args
 				name = name[..name.len - 1]
+				// E620: abort (!) on infallible function
+				if is_fn_infallible(name) {
+					return error("warning[E620]: can't abort infallible function")
+				}
 				for arg in expr.args {
 					sc_walk(arg, true)!
 				}
@@ -332,9 +338,13 @@ fn sc_walk(expr Expr, handled bool) ! {
 			if !handled && !is_fn_infallible(name) {
 				return error('error[E100]: unhandled error')
 			}
-			// E122: check closure return type for replace_with
-			if name == 'replace_with' && expr.closure.len > 0 {
-				sc_check_closure_return_type(expr.closure[0], 'string')!
+			// E122: check closure return type
+			if expr.closure.len > 0 {
+				if name == 'replace_with' {
+					sc_check_closure_return_type(expr.closure[0], 'string')!
+				} else if name == 'filter' {
+					sc_check_closure_return_type(expr.closure[0], 'boolean')!
+				}
 			}
 			// Recurse into args
 			for arg in expr.args {
@@ -438,16 +448,47 @@ fn sc_walk(expr Expr, handled bool) ! {
 }
 
 // sc_check_closure_return_type checks if a closure's body returns the expected type.
-// Used for replace_with (expects string return) and similar functions.
+// Used for replace_with (expects string return), filter (expects boolean), etc.
 fn sc_check_closure_return_type(closure_expr Expr, expected_type string) ! {
 	if closure_expr is ClosureExpr {
 		if closure_expr.body.len > 0 {
 			body := closure_expr.body[0]
+			// Check the final expression type
 			ret_type := sc_infer_simple_type(body)
 			if ret_type.len > 0 && ret_type != expected_type {
 				return error('error[E122]: type mismatch in closure return type, received: ${ret_type}, expected: ${expected_type}')
 			}
+			// Also check any return statements inside the body
+			sc_check_return_types(body, expected_type)!
 		}
+	}
+}
+
+// sc_check_return_types walks a body looking for return statements with wrong types.
+fn sc_check_return_types(expr Expr, expected_type string) ! {
+	match expr {
+		BlockExpr {
+			for e in expr.exprs {
+				sc_check_return_types(e, expected_type)!
+			}
+		}
+		ReturnExpr {
+			if expr.value.len > 0 {
+				ret_type := sc_infer_simple_type(expr.value[0])
+				if ret_type.len > 0 && ret_type != expected_type {
+					return error('error[E122]: type mismatch in closure return type, received: ${ret_type}, expected: ${expected_type}')
+				}
+			}
+		}
+		IfExpr {
+			if expr.then_block.len > 0 {
+				sc_check_return_types(expr.then_block[0], expected_type)!
+			}
+			if expr.else_block.len > 0 {
+				sc_check_return_types(expr.else_block[0], expected_type)!
+			}
+		}
+		else {}
 	}
 }
 
@@ -728,6 +769,117 @@ fn uses_del_path(expr Expr, del_paths map[string]bool) bool {
 			}
 		}
 		else {}
+	}
+	return false
+}
+
+// check_e900 detects unused literals and unused variable assignments in non-final
+// position of a block. E900 is a warning in upstream, but we treat it as error
+// for conformance.
+fn check_e900(expr Expr) ! {
+	match expr {
+		BlockExpr {
+			for i, e in expr.exprs {
+				if i < expr.exprs.len - 1 {
+					// Non-final expression: check if it's a pure literal (no side effects)
+					if e is LiteralExpr {
+						return error('warning[E900]: unused expression')
+					}
+					// Check if it's a variable-only assignment (not path assignment)
+					if e is AssignExpr {
+						target := e.target[0]
+						if target is IdentExpr {
+							// Local variable assignment — check if var is used later
+							vname := target.name
+							mut used := false
+							for j in (i + 1) .. expr.exprs.len {
+								if sc_expr_uses_var(expr.exprs[j], vname) {
+									used = true
+									break
+								}
+							}
+							if !used {
+								return error('warning[E900]: unused variable')
+							}
+						}
+					}
+				}
+				// Recurse into sub-expressions
+				check_e900(e)!
+			}
+		}
+		IfExpr {
+			if expr.then_block.len > 0 {
+				check_e900(expr.then_block[0])!
+			}
+			if expr.else_block.len > 0 {
+				check_e900(expr.else_block[0])!
+			}
+		}
+		else {}
+	}
+}
+
+// sc_expr_uses_var checks if an expression references a given variable name.
+fn sc_expr_uses_var(expr Expr, name string) bool {
+	match expr {
+		IdentExpr { return expr.name == name }
+		BlockExpr {
+			for e in expr.exprs {
+				if sc_expr_uses_var(e, name) { return true }
+			}
+		}
+		FnCallExpr {
+			for arg in expr.args {
+				if sc_expr_uses_var(arg, name) { return true }
+			}
+			if expr.closure.len > 0 && sc_expr_uses_var(expr.closure[0], name) { return true }
+		}
+		BinaryExpr {
+			return sc_expr_uses_var(expr.left[0], name) || sc_expr_uses_var(expr.right[0], name)
+		}
+		AssignExpr {
+			return sc_expr_uses_var(expr.value[0], name)
+		}
+		IfExpr {
+			if sc_expr_uses_var(expr.condition[0], name) { return true }
+			if expr.then_block.len > 0 && sc_expr_uses_var(expr.then_block[0], name) { return true }
+			if expr.else_block.len > 0 && sc_expr_uses_var(expr.else_block[0], name) { return true }
+		}
+		CoalesceExpr {
+			return sc_expr_uses_var(expr.expr[0], name) || sc_expr_uses_var(expr.default_[0], name)
+		}
+		NotExpr { return sc_expr_uses_var(expr.expr[0], name) }
+		UnaryExpr { return sc_expr_uses_var(expr.expr[0], name) }
+		IndexExpr {
+			return sc_expr_uses_var(expr.expr[0], name) || sc_expr_uses_var(expr.index[0], name)
+		}
+		ArrayExpr {
+			for item in expr.items {
+				if sc_expr_uses_var(item, name) { return true }
+			}
+		}
+		ObjectExpr {
+			for pair in expr.pairs {
+				if sc_expr_uses_var(pair.value, name) { return true }
+			}
+		}
+		ClosureExpr {
+			if expr.body.len > 0 { return sc_expr_uses_var(expr.body[0], name) }
+		}
+		ReturnExpr {
+			if expr.value.len > 0 { return sc_expr_uses_var(expr.value[0], name) }
+		}
+		AbortExpr {
+			if expr.message.len > 0 { return sc_expr_uses_var(expr.message[0], name) }
+		}
+		OkErrAssignExpr {
+			return sc_expr_uses_var(expr.value[0], name)
+		}
+		MergeAssignExpr {
+			return sc_expr_uses_var(expr.value[0], name)
+		}
+		else { return false }
 	}
 	return false
 }

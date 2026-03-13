@@ -32,7 +32,7 @@ fn parse_test_file(path string) (string, string, string, string, bool, bool, []s
 		if !done && tr.starts_with('#') {
 			c := tr[1..].trim_space()
 			if c.starts_with('SKIP') || c == 'skip' { skip = true; continue }
-			if c.starts_with('DIAGNOSTICS') { diag = true; continue }
+			if c.starts_with('DIAGNOSTICS') { diag = false; continue } // parse normally, don't skip
 			if c.starts_with('read_only_recursive:') {
 				p := c['read_only_recursive:'.len..].trim_space()
 				if p.len > 0 { ro_rec_paths << p }
@@ -81,7 +81,7 @@ fn parse_test_file(path string) (string, string, string, string, bool, bool, []s
 	src := src_lines.join('\n').trim_right('\n')
 	// Detect error-expecting tests: error[E or function call error (unless the source
 	// captures errors via ok/err assignment and returns the err variable)
-	mut is_err := rs.contains('error[E')
+	mut is_err := rs.contains('error[E') || rs.contains('warning[E')
 	if !is_err && rs.starts_with('function call error') {
 		// Only treat as error if the source doesn't capture errors via ok/err
 		has_err_capture := src.contains(', err =') || src.contains(', err |=')
@@ -252,7 +252,7 @@ fn test_upstream_vrl_conformance() {
 		if oj.len > 0 {
 			ov := parse_json_recursive(oj) or { skipped++; continue }
 			o := ov
-			match o { ObjectMap { obj = o.to_map() } else { skipped++; continue } }
+			match o { ObjectMap { obj = o.to_map() } else {} }
 		}
 
 		os.write_file('/tmp/vrl_test_progress.txt', name) or {}

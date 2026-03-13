@@ -314,7 +314,7 @@ fn (mut l Lexer) read_string(line int, col int) Token {
 				}
 				else {
 				c := l.src[l.pos]
-				l.errors << 'invalid escape character: \\${[c].bytestr()}'
+				l.errors << 'error[E209]: invalid escape character: \\${[c].bytestr()}'
 				result << `\\`
 				result << c
 			}
