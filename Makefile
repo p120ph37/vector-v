@@ -1,4 +1,4 @@
-.PHONY: build test test-vrl clean run-demo bench bench-v bench-rust
+.PHONY: build test test-vrl test-all clean run-demo bench bench-v bench-rust coverage coverage-json coverage-verbose
 
 build:
 	v -enable-globals -o vector-v src/
@@ -10,6 +10,26 @@ test:
 
 test-vrl:
 	v -enable-globals test src/vrl/
+
+test-all:
+	v -enable-globals test src/event/
+	v -enable-globals test src/conf/
+	v -enable-globals test src/transforms/
+	v -enable-globals test src/sinks/
+	v -enable-globals test src/sources/
+	v -enable-globals test src/topology/
+	v -enable-globals test src/api/
+	v -enable-globals test src/cliargs/
+	v -enable-globals test src/vrl/
+
+coverage:
+	@python3 scripts/coverage.py --src src
+
+coverage-json:
+	@python3 scripts/coverage.py --src src --json
+
+coverage-verbose:
+	@python3 scripts/coverage.py --src src --verbose
 
 clean:
 	rm -f vector-v
