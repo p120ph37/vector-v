@@ -422,10 +422,10 @@ fn seahash_read_u64(data []u8, offset int) u64 {
 }
 
 // xxHash — thin wrapper around system libxxhash (libxxhash-dev).
-// Uses a wrapper to isolate from V's bundled zstd XXH_NAMESPACE pollution.
-#flag -I@VMODROOT/thirdparty/xxhash
-#flag @VMODROOT/thirdparty/xxhash/libxxhash.a
+// Wrapper isolates from V's bundled zstd XXH_NAMESPACE pollution.
 #flag -lxxhash
+#flag -I @VMODROOT/src/vrl
+#flag @VMODROOT/src/vrl/xxhash_wrapper.c
 #include "xxhash_wrapper.h"
 
 @[typedef]
