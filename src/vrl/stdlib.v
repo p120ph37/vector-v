@@ -451,6 +451,39 @@ fn (mut rt Runtime) eval_fn_call_named(name string, expr FnCallExpr) !VrlValue {
 			patterns := if v := named['patterns'] { v } else if pos.len > 1 { pos[1] } else { return error('parse_groks requires patterns') }
 			return fn_parse_groks([pos[0], patterns])
 		}
+		'encrypt' {
+			if pos.len < 1 { return error('encrypt requires 4 arguments') }
+			algo := if v := named['algorithm'] { v } else if pos.len > 1 { pos[1] } else { return error('encrypt requires algorithm') }
+			key := if v := named['key'] { v } else if pos.len > 2 { pos[2] } else { return error('encrypt requires key') }
+			iv := if v := named['iv'] { v } else if pos.len > 3 { pos[3] } else { return error('encrypt requires iv') }
+			return fn_encrypt([pos[0], algo, key, iv])
+		}
+		'decrypt' {
+			if pos.len < 1 { return error('decrypt requires 4 arguments') }
+			algo := if v := named['algorithm'] { v } else if pos.len > 1 { pos[1] } else { return error('decrypt requires algorithm') }
+			key := if v := named['key'] { v } else if pos.len > 2 { pos[2] } else { return error('decrypt requires key') }
+			iv := if v := named['iv'] { v } else if pos.len > 3 { pos[3] } else { return error('decrypt requires iv') }
+			return fn_decrypt([pos[0], algo, key, iv])
+		}
+		'encrypt_ip' {
+			if pos.len < 1 { return error('encrypt_ip requires 3 arguments') }
+			key := if v := named['key'] { v } else if pos.len > 1 { pos[1] } else { return error('encrypt_ip requires key') }
+			mode := if v := named['mode'] { v } else if pos.len > 2 { pos[2] } else { return error('encrypt_ip requires mode') }
+			return fn_encrypt_ip([pos[0], key, mode])
+		}
+		'decrypt_ip' {
+			if pos.len < 1 { return error('decrypt_ip requires 3 arguments') }
+			key := if v := named['key'] { v } else if pos.len > 1 { pos[1] } else { return error('decrypt_ip requires key') }
+			mode := if v := named['mode'] { v } else if pos.len > 2 { pos[2] } else { return error('decrypt_ip requires mode') }
+			return fn_decrypt_ip([pos[0], key, mode])
+		}
+		'http_request' {
+			if pos.len < 1 { return error('http_request requires at least 1 argument') }
+			meth := if v := named['method'] { v } else if pos.len > 1 { pos[1] } else { VrlValue('GET') }
+			hdrs := if v := named['headers'] { v } else if pos.len > 2 { pos[2] } else { VrlValue(new_object_map()) }
+			body := if v := named['body'] { v } else if pos.len > 3 { pos[3] } else { VrlValue('') }
+			return fn_http_request([pos[0], meth, hdrs, body])
+		}
 		else {
 			// Fallback: pass all positional args to the general dispatch
 			mut all_args := pos.clone()
@@ -664,6 +697,13 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		// Misc
 		'uuid_from_friendly_id' { return fn_uuid_from_friendly_id(args) }
 		'validate_json_schema' { return fn_validate_json_schema(args) }
+		// Encrypt/Decrypt
+		'encrypt' { return fn_encrypt(args) }
+		'decrypt' { return fn_decrypt(args) }
+		'encrypt_ip' { return fn_encrypt_ip(args) }
+		'decrypt_ip' { return fn_decrypt_ip(args) }
+		// HTTP
+		'http_request' { return fn_http_request(args) }
 		else { return error('unknown function: ${name}') }
 	}
 }
@@ -771,6 +811,12 @@ fn fn_valid_keywords(name string) []string {
 		'dns_lookup' { ['value'] }
 		'encode_charset' { ['value', 'to_charset'] }
 		'decode_charset' { ['value', 'from_charset'] }
+		'validate_json_schema' { ['value', 'schema_definition', 'ignore_unknown_formats'] }
+		'encrypt' { ['plaintext', 'algorithm', 'key', 'iv'] }
+		'decrypt' { ['ciphertext', 'algorithm', 'key', 'iv'] }
+		'encrypt_ip' { ['ip', 'key', 'mode'] }
+		'decrypt_ip' { ['ip', 'key', 'mode'] }
+		'http_request' { ['url', 'method', 'headers', 'body'] }
 		else { []string{} }
 	}
 }
@@ -1184,6 +1230,11 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		// Protobuf
 		'parse_proto' { return fn_parse_proto(args) }
 		'encode_proto' { return fn_encode_proto(args) }
+		// Encrypt/Decrypt
+		'encrypt' { return fn_encrypt(args) }
+		'decrypt' { return fn_decrypt(args) }
+		'encrypt_ip' { return fn_encrypt_ip(args) }
+		'decrypt_ip' { return fn_decrypt_ip(args) }
 		else { return error('unknown function: ${name}') }
 	}
 }

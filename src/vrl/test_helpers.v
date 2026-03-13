@@ -6,11 +6,10 @@ fn uses_unimplemented_fn(src string) bool {
 		// Codec (require external libs)
 		'encode_charset', 'decode_charset',
 		// Other unimplemented
-		'community_id', 'decrypt', 'encrypt',
+		'community_id',
 		'murmur3',
 		'mezmo_patterns',
 		'reverse_dns',
-		'decrypt_ip', 'encrypt_ip',
 		'http_request',
 		'uuid_from_friendly_id',
 	]
