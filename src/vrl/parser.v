@@ -1,6 +1,6 @@
 module vrl
 
-import regex.pcre
+import pcre2
 import time
 
 // Parser turns a token stream into an AST.
@@ -844,7 +844,7 @@ fn (mut p Parser) parse_template(s string) !Expr {
 
 // validate_regex checks if a regex pattern is valid by trying to compile it.
 fn validate_regex(pattern string) ! {
-	_ := pcre.new_regex(pattern, 0) or {
+	_ := pcre2.new_regex(pattern, 0) or {
 		return error('regex parse error: ${err.msg()}')
 	}
 }

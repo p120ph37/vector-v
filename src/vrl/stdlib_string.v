@@ -1,7 +1,7 @@
 module vrl
 
 import math
-import regex.pcre
+import pcre2
 
 // camelcase(value, [original_case])
 fn fn_camelcase(args []VrlValue) !VrlValue {
@@ -560,7 +560,7 @@ fn fn_sieve(args []VrlValue) !VrlValue {
 	} else {
 		''
 	}
-	re := pcre.compile(normalize_regex_pattern(pattern)) or {
+	re := pcre2.compile(pattern) or {
 		return error('invalid regex: ${pattern}')
 	}
 
@@ -658,7 +658,7 @@ fn (mut rt Runtime) fn_replace_with(expr FnCallExpr) !VrlValue {
 			return error('function call error for "replace_with": Capture group cannot be named "string" or "captures"')
 		}
 
-		re := pcre.compile(normalize_regex_pattern(pattern)) or {
+		re := pcre2.compile(pattern) or {
 			return error('invalid regex: ${pattern}')
 		}
 
