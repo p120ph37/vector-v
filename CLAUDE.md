@@ -15,7 +15,13 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
   - `api/` — REST API server (health/ready endpoints)
   - `cliargs/` — Command-line argument parsing
   - `main.v` — Entry point
-- `upstream/` — Upstream Rust source for Vector and VRL (read-only reference)
+- `upstream/` — Upstream Rust source for Vector and VRL (read-only reference, git submodules)
+
+## Setup
+
+```bash
+git submodule update --init          # Fetch upstream Vector and VRL source into upstream/
+```
 
 ## Build & Test
 

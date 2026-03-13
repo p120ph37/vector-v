@@ -394,6 +394,63 @@ fn (mut rt Runtime) eval_fn_call_named(name string, expr FnCallExpr) !VrlValue {
 		'decode_charset' {
 			return fn_decode_charset(pos, named)
 		}
+		'parse_apache_log' {
+			if pos.len < 1 { return error('parse_apache_log requires at least 1 argument') }
+			format := if v := named['format'] { v } else if pos.len > 1 { pos[1] } else { return error('parse_apache_log requires format') }
+			ts_format := if v := named['timestamp_format'] { v } else if pos.len > 2 { pos[2] } else { VrlValue('') }
+			return fn_parse_apache_log([pos[0], format, ts_format])
+		}
+		'parse_nginx_log' {
+			if pos.len < 1 { return error('parse_nginx_log requires at least 1 argument') }
+			format := if v := named['format'] { v } else if pos.len > 1 { pos[1] } else { return error('parse_nginx_log requires format') }
+			ts_format := if v := named['timestamp_format'] { v } else if pos.len > 2 { pos[2] } else { VrlValue('') }
+			return fn_parse_nginx_log([pos[0], format, ts_format])
+		}
+		'parse_aws_vpc_flow_log' {
+			if pos.len < 1 { return error('parse_aws_vpc_flow_log requires 1 argument') }
+			format := if v := named['format'] { v } else if pos.len > 1 { pos[1] } else { VrlValue('') }
+			return fn_parse_aws_vpc_flow_log([pos[0], format])
+		}
+		'parse_cef' {
+			if pos.len < 1 { return error('parse_cef requires 1 argument') }
+			translate := VrlValue(get_named_bool(named, 'translate_custom_fields', false))
+			return fn_parse_cef([pos[0], translate])
+		}
+		'parse_xml' {
+			if pos.len < 1 { return error('parse_xml requires 1 argument') }
+			mut xml_args := [pos[0]]
+			xml_args << VrlValue(get_named_bool(named, 'trim', true))
+			xml_args << VrlValue(get_named_bool(named, 'include_attr', true))
+			xml_args << VrlValue(get_named_string(named, 'attr_prefix', '@'))
+			xml_args << VrlValue(get_named_string(named, 'text_key', 'text'))
+			xml_args << VrlValue(get_named_bool(named, 'always_use_text_key', false))
+			xml_args << VrlValue(get_named_bool(named, 'parse_bool', true))
+			xml_args << VrlValue(get_named_bool(named, 'parse_null', true))
+			xml_args << VrlValue(get_named_bool(named, 'parse_number', true))
+			return fn_parse_xml(xml_args)
+		}
+		'parse_user_agent' {
+			if pos.len < 1 { return error('parse_user_agent requires 1 argument') }
+			mode := VrlValue(get_named_string(named, 'mode', 'fast'))
+			return fn_parse_user_agent([pos[0], mode])
+		}
+		'parse_proto' {
+			if pos.len < 1 { return error('parse_proto requires 3 arguments') }
+			desc_file := if v := named['desc_file'] { v } else if pos.len > 1 { pos[1] } else { return error('parse_proto requires desc_file') }
+			msg_type := if v := named['message_type'] { v } else if pos.len > 2 { pos[2] } else { return error('parse_proto requires message_type') }
+			return fn_parse_proto([pos[0], desc_file, msg_type])
+		}
+		'encode_proto' {
+			if pos.len < 1 { return error('encode_proto requires 3 arguments') }
+			desc_file := if v := named['desc_file'] { v } else if pos.len > 1 { pos[1] } else { return error('encode_proto requires desc_file') }
+			msg_type := if v := named['message_type'] { v } else if pos.len > 2 { pos[2] } else { return error('encode_proto requires message_type') }
+			return fn_encode_proto([pos[0], desc_file, msg_type])
+		}
+		'parse_groks' {
+			if pos.len < 1 { return error('parse_groks requires 2 arguments') }
+			patterns := if v := named['patterns'] { v } else if pos.len > 1 { pos[1] } else { return error('parse_groks requires patterns') }
+			return fn_parse_groks([pos[0], patterns])
+		}
 		else {
 			// Fallback: pass all positional args to the general dispatch
 			mut all_args := pos.clone()
@@ -583,6 +640,22 @@ fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlVa
 		'redact' { return fn_redact(args) }
 		'match_datadog_query' { return fn_match_datadog_query(args) }
 		'parse_grok' { return fn_parse_grok(args) }
+		'parse_groks' { return fn_parse_groks(args) }
+		// New parsers
+		'parse_apache_log' { return fn_parse_apache_log(args) }
+		'parse_nginx_log' { return fn_parse_nginx_log(args) }
+		'parse_aws_alb_log' { return fn_parse_aws_alb_log(args) }
+		'parse_aws_vpc_flow_log' { return fn_parse_aws_vpc_flow_log(args) }
+		'parse_cef' { return fn_parse_cef(args) }
+		'parse_glog' { return fn_parse_glog(args) }
+		'parse_influxdb' { return fn_parse_influxdb(args) }
+		'parse_ruby_hash' { return fn_parse_ruby_hash(args) }
+		'parse_xml' { return fn_parse_xml(args) }
+		'parse_cbor' { return fn_parse_cbor(args) }
+		'parse_user_agent' { return fn_parse_user_agent(args) }
+		// Protobuf
+		'parse_proto' { return fn_parse_proto(args) }
+		'encode_proto' { return fn_encode_proto(args) }
 		// IP binary
 		'ip_ntop' { return fn_ip_ntop(args) }
 		'ip_pton' { return fn_ip_pton(args) }
@@ -678,6 +751,20 @@ fn fn_valid_keywords(name string) []string {
 		'redact' { ['value', 'filters', 'redactor'] }
 		'match_datadog_query' { ['value', 'query'] }
 		'parse_grok' { ['value', 'pattern'] }
+		'parse_groks' { ['value', 'patterns'] }
+		'parse_apache_log' { ['value', 'format', 'timestamp_format'] }
+		'parse_nginx_log' { ['value', 'format', 'timestamp_format'] }
+		'parse_aws_alb_log' { ['value'] }
+		'parse_aws_vpc_flow_log' { ['value', 'format'] }
+		'parse_cef' { ['value', 'translate_custom_fields'] }
+		'parse_glog' { ['value'] }
+		'parse_influxdb' { ['value'] }
+		'parse_ruby_hash' { ['value'] }
+		'parse_xml' { ['value', 'trim', 'include_attr', 'attr_prefix', 'text_key', 'always_use_text_key', 'parse_bool', 'parse_null', 'parse_number'] }
+		'parse_cbor' { ['value'] }
+		'parse_user_agent' { ['value', 'mode'] }
+		'parse_proto' { ['value', 'desc_file', 'message_type'] }
+		'encode_proto' { ['value', 'desc_file', 'message_type'] }
 		'parse_etld' { ['value', 'plus_parts', 'psl'] }
 		'parse_aws_cloudwatch_log_subscription_message' { ['value'] }
 		'community_id' { ['source_ip', 'destination_ip', 'protocol', 'source_port', 'destination_port', 'seed'] }
@@ -846,6 +933,13 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'parse_klog' { return fn_parse_klog([a0]) }
 			'parse_linux_authorization' { return fn_parse_linux_authorization([a0]) }
 			'parse_aws_cloudwatch_log_subscription_message' { return fn_parse_aws_cloudwatch_log_subscription_message([a0]) }
+			'parse_glog' { return fn_parse_glog([a0]) }
+			'parse_aws_alb_log' { return fn_parse_aws_alb_log([a0]) }
+			'parse_influxdb' { return fn_parse_influxdb([a0]) }
+			'parse_ruby_hash' { return fn_parse_ruby_hash([a0]) }
+			'parse_xml' { return fn_parse_xml([a0]) }
+			'parse_cbor' { return fn_parse_cbor([a0]) }
+			'parse_user_agent' { return fn_parse_user_agent([a0]) }
 			'get_timezone_name' { return fn_get_timezone_name([a0]) }
 			'parse_url' { return fn_parse_url([a0]) }
 			'parse_etld' { return fn_parse_etld([a0], map[string]VrlValue{}) }
@@ -1072,8 +1166,24 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		'redact' { return fn_redact(args) }
 		// Datadog query matching
 		'match_datadog_query' { return fn_match_datadog_query(args) }
-		// Grok (stub)
+		// Grok
 		'parse_grok' { return fn_parse_grok(args) }
+		'parse_groks' { return fn_parse_groks(args) }
+		// New parsers
+		'parse_apache_log' { return fn_parse_apache_log(args) }
+		'parse_nginx_log' { return fn_parse_nginx_log(args) }
+		'parse_aws_alb_log' { return fn_parse_aws_alb_log(args) }
+		'parse_aws_vpc_flow_log' { return fn_parse_aws_vpc_flow_log(args) }
+		'parse_cef' { return fn_parse_cef(args) }
+		'parse_glog' { return fn_parse_glog(args) }
+		'parse_influxdb' { return fn_parse_influxdb(args) }
+		'parse_ruby_hash' { return fn_parse_ruby_hash(args) }
+		'parse_xml' { return fn_parse_xml(args) }
+		'parse_cbor' { return fn_parse_cbor(args) }
+		'parse_user_agent' { return fn_parse_user_agent(args) }
+		// Protobuf
+		'parse_proto' { return fn_parse_proto(args) }
+		'encode_proto' { return fn_encode_proto(args) }
 		else { return error('unknown function: ${name}') }
 	}
 }

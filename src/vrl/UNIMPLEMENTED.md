@@ -1,26 +1,8 @@
 # Unimplemented VRL Functions & Vector Components
 
-## VRL Function Coverage: ~180 / 201 upstream (~90%)
+## VRL Function Coverage: ~195 / 201 upstream (~97%)
 
-### Unimplemented VRL Functions (21 remaining)
-
-#### Parsing (13)
-- `parse_apache_log` — Apache combined/common log format
-- `parse_aws_alb_log` — AWS ALB access logs
-- `parse_aws_vpc_flow_log` — AWS VPC flow log records
-- `parse_cbor` — CBOR binary format
-- `parse_cef` — ArcSight Common Event Format
-- `parse_glog` — Google glog format
-- `parse_groks` — Multi-pattern grok (like parse_grok but with multiple patterns)
-- `parse_influxdb` — InfluxDB line protocol
-- `parse_nginx_log` — Nginx combined/error log format
-- `parse_proto` — Protocol Buffers (requires descriptor files)
-- `parse_ruby_hash` — Ruby hash literal syntax
-- `parse_user_agent` — User-Agent string parsing (requires UA database)
-- `parse_xml` — XML to object conversion
-
-#### Encoding (1)
-- `encode_proto` — Protocol Buffers encoding (requires descriptor files)
+### Unimplemented VRL Functions (6 remaining)
 
 #### Crypto (4)
 - `encrypt` — AES encryption (AES-256-CFB, AES-128-SIV)
@@ -28,19 +10,15 @@
 - `encrypt_ip` — Format-preserving IP encryption (FF1)
 - `decrypt_ip` — Format-preserving IP decryption (FF1)
 
-#### Misc (3)
+#### Misc (2)
 - `validate_json_schema` — JSON Schema validation (requires schema file loading)
 - `http_request` — HTTP request from within VRL (side-effecting, security-sensitive)
-- `encode_proto` / `parse_proto` — Protobuf encode/decode (requires prost-reflect equivalent)
 
 ### Notes
 - `validate_json_schema` returns an informative "not implemented" error at runtime
 - `http_request` is intentionally excluded as it introduces network side-effects into VRL evaluation
-- `encode_proto`/`parse_proto` require protobuf descriptor file infrastructure
 - The `encrypt`/`decrypt` family requires AES cipher implementations (AES-256-CFB, AES-256-OFB-NP, AES-128-SIV)
 - `encrypt_ip`/`decrypt_ip` require FF1 format-preserving encryption
-- `parse_user_agent` requires a UA parser database (woothee or similar)
-- Most parsing functions (apache, nginx, alb, vpc_flow, cef, glog, influxdb) are log-format-specific regex/state-machine parsers
 
 ---
 
