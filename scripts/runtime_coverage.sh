@@ -102,23 +102,26 @@ if [[ -n "$FILTER" ]]; then
 fi
 
 # shellcheck disable=SC2086
-v cover $cover_flags "$COV_DIR/" | tee "$COV_DIR/report.txt"
+v cover $cover_flags "$COV_DIR/" > "$COV_DIR/report_raw.txt"
+
+# Filter out V standard library files, keep only project source files (src/)
+grep -E '^\s*src/' "$COV_DIR/report_raw.txt" > "$COV_DIR/report.txt" || true
+
+# Print header and filtered report
+printf "%-80s | %8s | %8s | %8s\n" "File" "Executed" "Total" "Coverage"
+printf -- '-%.0s' {1..115}; echo
+cat "$COV_DIR/report.txt"
 
 # Parse overall coverage from the pipe-delimited vcover output
 #   file | executed | total | pct%
-# Only count project source files (src/), skip V standard library files
 total_executed=0
 total_points=0
 while IFS='|' read -r file executed points _pct; do
-    file=$(echo "$file" | tr -d ' ')
     executed=$(echo "$executed" | tr -d ' ')
     points=$(echo "$points" | tr -d ' ')
     if [[ "$executed" =~ ^[0-9]+$ ]] && [[ "$points" =~ ^[0-9]+$ ]]; then
-        # Skip V standard library and non-project files
-        if [[ "$file" == src/* ]] || [[ "$file" == */src/* ]]; then
-            total_executed=$((total_executed + executed))
-            total_points=$((total_points + points))
-        fi
+        total_executed=$((total_executed + executed))
+        total_points=$((total_points + points))
     fi
 done < "$COV_DIR/report.txt"
 
