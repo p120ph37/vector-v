@@ -85,13 +85,26 @@ modules=(
 )
 
 log_info "Compiling and running tests with coverage instrumentation..."
+
+# Each test module compilation can overwrite metadata files for shared source
+# files. Some compilations produce npoints=0 for files that other compilations
+# instrument properly. We run each module into a separate coverage subdirectory,
+# then merge results — keeping the metadata entry with the most coverage points
+# for each source file.
+mod_index=0
 for mod in "${modules[@]}"; do
-    log_verbose "Testing $mod"
+    mod_cov="$COV_DIR/mod_${mod_index}"
+    mkdir -p "$mod_cov/meta"
+    log_verbose "Testing $mod → $mod_cov"
     # shellcheck disable=SC2086
-    v -enable-globals -coverage "$COV_DIR" test "$mod" 2>&1 || {
+    v -enable-globals -coverage "$mod_cov" test "$mod" 2>&1 || {
         log_warn "Tests in $mod had failures (coverage data still collected)"
     }
+    mod_index=$((mod_index + 1))
 done
+
+# The aggregator script scans all subdirectories automatically,
+# merging metadata and counters across all module compilations.
 
 # Generate report — use custom aggregator to read raw coverage data directly,
 # working around `v cover` not reporting all instrumented files.
