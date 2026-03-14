@@ -15,7 +15,25 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
   - `api/` — REST API server (health/ready endpoints)
   - `cliargs/` — Command-line argument parsing
   - `main.v` — Entry point
-- `upstream/` — Upstream Rust source for Vector and VRL (read-only reference)
+- `upstream/` — Upstream Rust source for Vector and VRL (read-only reference, git submodules)
+
+## Setup
+
+```bash
+git submodule update --init          # Fetch upstream Vector and VRL source into upstream/
+```
+
+## Environment Setup
+
+The V compiler (>= 0.4.7) must be installed with clang as the C backend. If missing, install from source:
+
+```bash
+apt-get install -y clang libxxhash-dev libpcre2-dev libsnappy-dev liblz4-dev
+git clone https://github.com/vlang/v /opt/vlang
+cd /opt/vlang && make && ./v -cc clang self
+ln -sf /opt/vlang/v /usr/local/bin/v
+v version  # verify
+```
 
 ## Environment Setup
 
