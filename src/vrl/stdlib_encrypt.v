@@ -3,25 +3,7 @@ module vrl
 import crypto.aes
 import crypto.cipher
 import rand
-
-// OpenSSL bindings — only used for CHACHA20-POLY1305 (not an AES mode).
-#flag -lssl -lcrypto
-#include <openssl/evp.h>
-
-fn C.EVP_CIPHER_CTX_new() voidptr
-fn C.EVP_CIPHER_CTX_free(ctx voidptr)
-fn C.EVP_EncryptInit_ex(ctx voidptr, cipher_ voidptr, engine voidptr, key &u8, iv &u8) int
-fn C.EVP_EncryptUpdate(ctx voidptr, out &u8, outl &int, inp &u8, inl int) int
-fn C.EVP_EncryptFinal_ex(ctx voidptr, out &u8, outl &int) int
-fn C.EVP_DecryptInit_ex(ctx voidptr, cipher_ voidptr, engine voidptr, key &u8, iv &u8) int
-fn C.EVP_DecryptUpdate(ctx voidptr, out &u8, outl &int, inp &u8, inl int) int
-fn C.EVP_DecryptFinal_ex(ctx voidptr, out &u8, outl &int) int
-fn C.EVP_CIPHER_CTX_ctrl(ctx voidptr, typ int, arg int, ptr voidptr) int
-fn C.EVP_chacha20_poly1305() voidptr
-
-const evp_ctrl_aead_set_ivlen = 0x9
-const evp_ctrl_aead_get_tag = 0x10
-const evp_ctrl_aead_set_tag = 0x11
+import x.crypto.chacha20poly1305
 
 // ============================================================================
 // Cipher algorithm table
@@ -80,7 +62,7 @@ fn get_cipher_info(algorithm string) !CipherInfo {
 		// AES-SIV (OpenSSL 3.0 only)
 		'AES-128-SIV' { CipherInfo{ mode: .siv, key_len: 32, iv_len: 16 } }
 		'AES-256-SIV' { CipherInfo{ mode: .siv, key_len: 64, iv_len: 16 } }
-		// CHACHA20-POLY1305 (OpenSSL)
+		// CHACHA20-POLY1305 (native V)
 		'CHACHA20-POLY1305' { CipherInfo{ mode: .chacha20_poly1305, key_len: 32, iv_len: 12 } }
 		// Not available without libsodium
 		'XCHACHA20-POLY1305' { CipherInfo{ mode: .xchacha20_poly1305, key_len: 32, iv_len: 24 } }
@@ -352,83 +334,23 @@ fn cmac_xor_dbl(d []u8, cmac_val []u8) []u8 {
 }
 
 // ============================================================================
-// OpenSSL-only: AEAD (CHACHA20-POLY1305)
+// Native V: AEAD (CHACHA20-POLY1305) via x.crypto.chacha20poly1305
 // ============================================================================
 
-fn ossl_encrypt_aead(plaintext []u8, key []u8, iv []u8) ![]u8 {
-	ctx := C.EVP_CIPHER_CTX_new()
-	if ctx == unsafe { nil } {
-		return error('encryption failed: unable to create cipher context')
+fn v_encrypt_chacha20_poly1305(plaintext []u8, key []u8, nonce []u8) ![]u8 {
+	// Returns ciphertext with appended 16-byte Poly1305 tag
+	return chacha20poly1305.encrypt(plaintext, key, nonce, []) or {
+		return error('encryption failed: ${err}')
 	}
-	defer { C.EVP_CIPHER_CTX_free(ctx) }
-
-	c := C.EVP_chacha20_poly1305()
-	if C.EVP_EncryptInit_ex(ctx, c, unsafe { nil }, unsafe { nil }, unsafe { nil }) != 1 {
-		return error('encryption failed: init error')
-	}
-	if C.EVP_CIPHER_CTX_ctrl(ctx, evp_ctrl_aead_set_ivlen, iv.len, unsafe { nil }) != 1 {
-		return error('encryption failed: set IV length error')
-	}
-	if C.EVP_EncryptInit_ex(ctx, unsafe { nil }, unsafe { nil }, key.data, iv.data) != 1 {
-		return error('encryption failed: set key/IV error')
-	}
-	mut out := []u8{len: plaintext.len + 16}
-	mut out_len := 0
-	if C.EVP_EncryptUpdate(ctx, out.data, &out_len, plaintext.data, plaintext.len) != 1 {
-		return error('encryption failed: update error')
-	}
-	mut final_len := 0
-	if C.EVP_EncryptFinal_ex(ctx, unsafe { &u8(out.data) + out_len }, &final_len) != 1 {
-		return error('encryption failed: final error')
-	}
-	total := out_len + final_len
-	mut tag := []u8{len: 16}
-	if C.EVP_CIPHER_CTX_ctrl(ctx, evp_ctrl_aead_get_tag, 16, tag.data) != 1 {
-		return error('encryption failed: get tag error')
-	}
-	mut result := out[..total].clone()
-	result << tag
-	return result
 }
 
-fn ossl_decrypt_aead(ciphertext_with_tag []u8, key []u8, iv []u8) ![]u8 {
+fn v_decrypt_chacha20_poly1305(ciphertext_with_tag []u8, key []u8, nonce []u8) ![]u8 {
 	if ciphertext_with_tag.len < 16 {
 		return error('decryption failed: ciphertext too short for authentication tag')
 	}
-	tag_offset := ciphertext_with_tag.len - 16
-	ct := ciphertext_with_tag[..tag_offset]
-	tag := ciphertext_with_tag[tag_offset..].clone()
-
-	ctx := C.EVP_CIPHER_CTX_new()
-	if ctx == unsafe { nil } {
-		return error('decryption failed: unable to create cipher context')
-	}
-	defer { C.EVP_CIPHER_CTX_free(ctx) }
-
-	c := C.EVP_chacha20_poly1305()
-	if C.EVP_DecryptInit_ex(ctx, c, unsafe { nil }, unsafe { nil }, unsafe { nil }) != 1 {
-		return error('decryption failed: init error')
-	}
-	if C.EVP_CIPHER_CTX_ctrl(ctx, evp_ctrl_aead_set_ivlen, iv.len, unsafe { nil }) != 1 {
-		return error('decryption failed: set IV length error')
-	}
-	if C.EVP_DecryptInit_ex(ctx, unsafe { nil }, unsafe { nil }, key.data, iv.data) != 1 {
-		return error('decryption failed: set key/IV error')
-	}
-	mut out := []u8{len: ct.len + 16}
-	mut out_len := 0
-	if C.EVP_DecryptUpdate(ctx, out.data, &out_len, ct.data, ct.len) != 1 {
-		return error('decryption failed: update error')
-	}
-	if C.EVP_CIPHER_CTX_ctrl(ctx, evp_ctrl_aead_set_tag, 16, tag.data) != 1 {
-		return error('decryption failed: set tag error')
-	}
-	mut final_len := 0
-	if C.EVP_DecryptFinal_ex(ctx, unsafe { &u8(out.data) + out_len }, &final_len) != 1 {
+	return chacha20poly1305.decrypt(ciphertext_with_tag, key, nonce, []) or {
 		return error('decryption failed: authentication failed')
 	}
-	total := out_len + final_len
-	return out[..total].clone()
 }
 
 
@@ -576,7 +498,7 @@ fn fn_encrypt(args []VrlValue) !VrlValue {
 			v_encrypt_siv(pt, key_bytes, iv_bytes)!
 		}
 		.chacha20_poly1305 {
-			ossl_encrypt_aead(pt, key_bytes, iv_bytes)!
+			v_encrypt_chacha20_poly1305(pt, key_bytes, iv_bytes)!
 		}
 		.xchacha20_poly1305, .xsalsa20_poly1305 {
 			return error('${algorithm} requires libsodium which is not available')
@@ -627,7 +549,7 @@ fn fn_decrypt(args []VrlValue) !VrlValue {
 			v_decrypt_siv(ct, key_bytes, iv_bytes)!
 		}
 		.chacha20_poly1305 {
-			ossl_decrypt_aead(ct, key_bytes, iv_bytes)!
+			v_decrypt_chacha20_poly1305(ct, key_bytes, iv_bytes)!
 		}
 		.xchacha20_poly1305, .xsalsa20_poly1305 {
 			return error('${algorithm} requires libsodium which is not available')
