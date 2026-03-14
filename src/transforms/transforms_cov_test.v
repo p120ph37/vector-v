@@ -181,7 +181,10 @@ fn test_throttle_token_refill_after_window() {
 
 fn test_build_transform_aws_ec2_metadata() {
 	// Cover the aws_ec2_metadata branch in build_transform
-	t := build_transform('aws_ec2_metadata', map[string]string{}) or { return }
+	t := build_transform('aws_ec2_metadata', {
+		'required': 'false'
+		'endpoint': 'http://127.0.0.1:19'
+	}) or { return }
 	assert t is Ec2MetadataTransform
 }
 
