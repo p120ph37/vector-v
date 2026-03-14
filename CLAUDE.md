@@ -7,8 +7,8 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
 - `src/` — V source code
   - `vrl/` — VRL (Vector Remap Language) interpreter and runtime
   - `sources/` — Data ingestion components (stdin, demo_logs, fluent)
-  - `transforms/` — Data processing (remap, filter, reduce, aws_ec2_metadata)
-  - `sinks/` — Data output destinations (console, blackhole, http_client, loki, opentelemetry)
+  - `transforms/` — Data processing (remap, filter, reduce, aws_ec2_metadata, dedupe, sample, throttle, exclusive_route, passthrough)
+  - `sinks/` — Data output destinations (console, blackhole, loki, opentelemetry)
   - `event/` — Event types (log, metric, trace)
   - `topology/` — Component graph management with input-based routing
   - `conf/` — TOML configuration parsing
@@ -21,18 +21,6 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
 
 ```bash
 git submodule update --init          # Fetch upstream Vector and VRL source into upstream/
-```
-
-## Environment Setup
-
-The V compiler (>= 0.4.7) must be installed with clang as the C backend. If missing, install from source:
-
-```bash
-apt-get install -y clang libxxhash-dev libpcre2-dev libsnappy-dev liblz4-dev
-git clone https://github.com/vlang/v /opt/vlang
-cd /opt/vlang && make && ./v -cc clang self
-ln -sf /opt/vlang/v /usr/local/bin/v
-v version  # verify
 ```
 
 ## Environment Setup
@@ -77,16 +65,20 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **demo_logs** — Generates sample log events
 - **fluent** — Fluent Forward Protocol v1 over TCP (msgpack)
 
-### Transforms (4 / 8 upstream)
+### Transforms (9 / 15 upstream)
 - **remap** — VRL program execution
 - **filter** — Condition-based event filtering
 - **reduce** — Event accumulation with merge strategies
 - **aws_ec2_metadata** — EC2 instance metadata enrichment via IMDSv2
+- **dedupe** — Event deduplication with LRU cache
+- **sample** — Statistical event sampling (random or key-based)
+- **throttle** — Rate limiting with token bucket algorithm
+- **exclusive_route** — Route events to first matching output
+- **passthrough** — Identity transform (pass events unchanged)
 
-### Sinks (5 / 43 upstream)
+### Sinks (4 / 43 upstream)
 - **console** — Write to stdout/stderr (json, text, logfmt)
 - **blackhole** — Discard events (benchmarking)
-- **http_client** — Generic HTTP output
 - **loki** — Grafana Loki push API (JSON, label-based batching)
 - **opentelemetry** — OTLP HTTP logs export
 

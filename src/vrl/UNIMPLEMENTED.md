@@ -1,24 +1,8 @@
-# Unimplemented VRL Functions & Vector Components
+# Unimplemented Vector Components
 
-## VRL Function Coverage: ~195 / 201 upstream (~97%)
+## VRL Function Coverage: ~201 / 201 upstream (~100%)
 
-### Unimplemented VRL Functions (6 remaining)
-
-#### Crypto (4)
-- `encrypt` — AES encryption (AES-256-CFB, AES-128-SIV)
-- `decrypt` — AES decryption
-- `encrypt_ip` — Format-preserving IP encryption (FF1)
-- `decrypt_ip` — Format-preserving IP decryption (FF1)
-
-#### Misc (2)
-- `validate_json_schema` — JSON Schema validation (requires schema file loading)
-- `http_request` — HTTP request from within VRL (side-effecting, security-sensitive)
-
-### Notes
-- `validate_json_schema` returns an informative "not implemented" error at runtime
-- `http_request` is intentionally excluded as it introduces network side-effects into VRL evaluation
-- The `encrypt`/`decrypt` family requires AES cipher implementations (AES-256-CFB, AES-256-OFB-NP, AES-128-SIV)
-- `encrypt_ip`/`decrypt_ip` require FF1 format-preserving encryption
+All upstream VRL functions are implemented.
 
 ---
 
@@ -55,16 +39,15 @@
 | vector | Vector-to-Vector protocol |
 | websocket | WebSocket client |
 
-### Transforms (4 not implemented)
+### Transforms (6 not implemented)
 | Transform | Notes |
 |-----------|-------|
-| dedupe | Event deduplication |
-| exclusive_route | Route to first matching output |
 | lua | Lua scripting |
-| sample | Statistical sampling |
 | tag_cardinality_limit | High-cardinality tag limiting |
-| throttle | Rate limiting |
 | window | Time-window aggregation |
+| log_to_metric | Convert log events to metrics |
+| metric_to_log | Convert metrics to log events |
+| aggregate | Aggregate metrics over time |
 
 ### Sinks (38+ not implemented)
 Major categories not yet implemented:
