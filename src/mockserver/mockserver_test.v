@@ -10,7 +10,7 @@ fn test_start_and_url() {
 		mock.stop()
 	}
 
-	assert mock.port >= 28100
+	assert mock.port > 0
 	assert mock.url().starts_with('http://127.0.0.1:')
 }
 

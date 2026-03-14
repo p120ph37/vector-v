@@ -128,7 +128,7 @@ pub fn start(routes ...Route) !MockServer {
 
 	port := <-ready
 	if port < 0 {
-		return error('mockserver: could not bind to any port in range 28100-28999')
+		return error('mockserver: could not bind to loopback port')
 	}
 
 	return MockServer{
@@ -146,7 +146,7 @@ pub fn start_with_routes(routes []Route) !MockServer {
 
 	port := <-ready
 	if port < 0 {
-		return error('mockserver: could not bind to any port in range 28100-28999')
+		return error('mockserver: could not bind to loopback port')
 	}
 
 	return MockServer{
@@ -207,22 +207,32 @@ pub fn (mut s MockServer) stop() {
 // --- Internal server implementation ---
 
 fn run_mock_server(routes []Route, capture chan CapturedRequest, ready chan int) {
-	for p in 28100 .. 29000 {
-		mut listener := net.listen_tcp(.ip, '127.0.0.1:${p}') or { continue }
-		ready <- p
-
-		mut route_hits := map[string]int{}
-
-		for {
-			mut conn := listener.accept() or {
-				time.sleep(10 * time.millisecond)
-				continue
-			}
-			handle_mock_conn(mut conn, routes, capture, mut route_hits)
-		}
+	mut listener := net.listen_tcp(.ip, '127.0.0.1:0') or {
+		ready <- -1
 		return
 	}
-	ready <- -1
+
+	addr_str := (listener.addr() or { net.Addr{} }).str()
+	colon := addr_str.last_index(':') or {
+		ready <- -1
+		return
+	}
+	port := addr_str[colon + 1..].int()
+	if port == 0 {
+		ready <- -1
+		return
+	}
+	ready <- port
+
+	mut route_hits := map[string]int{}
+
+	for {
+		mut conn := listener.accept() or {
+			time.sleep(10 * time.millisecond)
+			continue
+		}
+		handle_mock_conn(mut conn, routes, capture, mut route_hits)
+	}
 }
 
 fn handle_mock_conn(mut conn net.TcpConn, routes []Route, capture chan CapturedRequest, mut route_hits map[string]int) {
