@@ -20,3 +20,4 @@ src/vrl/vrl.so
 
 # Coverage artifacts
 .coverage/
+__pycache__/
