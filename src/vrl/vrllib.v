@@ -495,217 +495,252 @@ fn (mut rt Runtime) eval_fn_call_named(name string, expr FnCallExpr) !VrlValue {
 	}
 }
 
+// VrlFn is the function signature for positional VRL function dispatch.
+type VrlFn = fn ([]VrlValue) !VrlValue
+
+// Wrappers for functions with non-standard signatures.
+fn fn_is_string_w(args []VrlValue) !VrlValue { return fn_is_type(args, 'string') }
+fn fn_is_integer_w(args []VrlValue) !VrlValue { return fn_is_type(args, 'integer') }
+fn fn_is_float_w(args []VrlValue) !VrlValue { return fn_is_type(args, 'float') }
+fn fn_is_boolean_w(args []VrlValue) !VrlValue { return fn_is_type(args, 'boolean') }
+fn fn_is_null_w(args []VrlValue) !VrlValue { return fn_is_type(args, 'null') }
+fn fn_is_array_w(args []VrlValue) !VrlValue { return fn_is_type(args, 'array') }
+fn fn_is_object_w(args []VrlValue) !VrlValue { return fn_is_type(args, 'object') }
+fn fn_log_noop(args []VrlValue) !VrlValue { return VrlValue(VrlNull{}) }
+fn fn_now_w(args []VrlValue) !VrlValue { return VrlValue(Timestamp{t: time.now()}) }
+fn fn_uuid_v4_w(args []VrlValue) !VrlValue { return fn_uuid_v4() }
+fn fn_random_bool_w(args []VrlValue) !VrlValue { return fn_random_bool() }
+fn fn_get_hostname_w(args []VrlValue) !VrlValue { return fn_get_hostname() }
+fn fn_parse_etld_positional(args []VrlValue) !VrlValue { return fn_parse_etld(args, map[string]VrlValue{}) }
+
+// vrl_fn_dispatch is the data-driven dispatch table mapping function names
+// to their positional-argument handler. Built once, used for all dispatch.
+__global vrl_fn_dispatch = build_fn_dispatch_table()
+
+fn build_fn_dispatch_table() map[string]VrlFn {
+	mut t := map[string]VrlFn{}
+	// String
+	t['to_string'] = fn_to_string
+	t['downcase'] = fn_downcase
+	t['upcase'] = fn_upcase
+	t['contains'] = fn_contains
+	t['starts_with'] = fn_starts_with
+	t['ends_with'] = fn_ends_with
+	t['length'] = fn_length
+	t['strip_whitespace'] = fn_strip_whitespace
+	t['trim'] = fn_strip_whitespace
+	t['replace'] = fn_replace
+	t['slice'] = fn_slice
+	t['split'] = fn_split
+	t['join'] = fn_join
+	t['strlen'] = fn_strlen
+	t['truncate'] = fn_truncate
+	t['to_int'] = fn_to_int
+	t['int'] = fn_to_int
+	t['to_float'] = fn_to_float
+	t['float'] = fn_to_float
+	t['to_bool'] = fn_to_bool
+	t['bool'] = fn_to_bool
+	t['string'] = fn_string
+	t['is_nullish'] = fn_is_nullish
+	t['is_string'] = fn_is_string_w
+	t['is_integer'] = fn_is_integer_w
+	t['is_float'] = fn_is_float_w
+	t['is_boolean'] = fn_is_boolean_w
+	t['is_null'] = fn_is_null_w
+	t['is_array'] = fn_is_array_w
+	t['is_object'] = fn_is_object_w
+	t['keys'] = fn_keys
+	t['values'] = fn_values
+	t['flatten'] = fn_flatten
+	t['unflatten'] = fn_unflatten
+	t['merge'] = fn_merge
+	t['compact'] = fn_compact
+	t['push'] = fn_push
+	t['append'] = fn_append
+	t['encode_json'] = fn_encode_json
+	t['decode_json'] = fn_decode_json
+	t['parse_json'] = fn_decode_json
+	t['abs'] = fn_abs
+	t['ceil'] = fn_ceil
+	t['floor'] = fn_floor
+	t['round'] = fn_round
+	t['mod'] = fn_mod
+	t['format_number'] = fn_format_number
+	t['match'] = fn_match
+	t['match_any'] = fn_match_any
+	t['includes'] = fn_includes
+	t['contains_all'] = fn_contains_all
+	t['find'] = fn_find
+	t['get'] = fn_get
+	t['set'] = fn_set
+	t['unique'] = fn_unique
+	t['pop'] = fn_pop
+	t['to_regex'] = fn_to_regex
+	t['from_unix_timestamp'] = fn_from_unix_timestamp
+	t['to_unix_timestamp'] = fn_to_unix_timestamp
+	t['assert'] = fn_assert
+	t['assert_eq'] = fn_assert_eq
+	t['array'] = fn_ensure_array
+	t['object'] = fn_ensure_object
+	t['log'] = fn_log_noop
+	t['now'] = fn_now_w
+	t['uuid_v4'] = fn_uuid_v4_w
+	t['get_env_var'] = fn_get_env_var
+	// Codec
+	t['encode_base64'] = fn_encode_base64
+	t['decode_base64'] = fn_decode_base64
+	t['encode_base16'] = fn_encode_base16
+	t['decode_base16'] = fn_decode_base16
+	t['encode_percent'] = fn_encode_percent
+	t['decode_percent'] = fn_decode_percent
+	t['encode_csv'] = fn_encode_csv
+	t['encode_key_value'] = fn_encode_key_value
+	t['encode_logfmt'] = fn_encode_logfmt
+	t['decode_mime_q'] = fn_decode_mime_q
+	t['encode_zlib'] = fn_encode_zlib
+	t['decode_zlib'] = fn_decode_zlib
+	t['encode_gzip'] = fn_encode_gzip
+	t['decode_gzip'] = fn_decode_gzip
+	t['encode_zstd'] = fn_encode_zstd
+	t['decode_zstd'] = fn_decode_zstd
+	t['encode_punycode'] = fn_encode_punycode
+	t['decode_punycode'] = fn_decode_punycode
+	// Crypto
+	t['sha1'] = fn_sha1
+	t['sha2'] = fn_sha2
+	t['sha3'] = fn_sha3
+	t['md5'] = fn_md5
+	t['hmac'] = fn_hmac
+	t['crc32'] = fn_crc32
+	t['seahash'] = fn_seahash
+	t['xxhash'] = fn_xxhash
+	t['crc'] = fn_crc
+	// Codec
+	t['encode_snappy'] = fn_encode_snappy
+	t['decode_snappy'] = fn_decode_snappy
+	t['encode_lz4'] = fn_encode_lz4
+	t['decode_lz4'] = fn_decode_lz4
+	// String
+	t['camelcase'] = fn_camelcase
+	t['pascalcase'] = fn_pascalcase
+	t['snakecase'] = fn_snakecase
+	t['kebabcase'] = fn_kebabcase
+	t['screamingsnakecase'] = fn_screamingsnakecase
+	t['basename'] = fn_basename
+	t['dirname'] = fn_dirname
+	t['split_path'] = fn_split_path
+	t['strip_ansi_escape_codes'] = fn_strip_ansi_escape_codes
+	t['shannon_entropy'] = fn_shannon_entropy
+	t['sieve'] = fn_sieve
+	// Parse
+	t['parse_regex'] = fn_parse_regex
+	t['parse_regex_all'] = fn_parse_regex_all
+	t['parse_key_value'] = fn_parse_key_value
+	t['parse_logfmt'] = fn_parse_logfmt
+	t['parse_klog'] = fn_parse_klog
+	t['parse_linux_authorization'] = fn_parse_linux_authorization
+	t['parse_csv'] = fn_parse_csv
+	t['parse_url'] = fn_parse_url
+	t['parse_etld'] = fn_parse_etld_positional
+	t['parse_query_string'] = fn_parse_query_string
+	t['parse_tokens'] = fn_parse_tokens
+	t['parse_common_log'] = fn_parse_common_log
+	t['parse_yaml'] = fn_parse_yaml
+	t['parse_syslog'] = fn_parse_syslog
+	t['parse_aws_cloudwatch_log_subscription_message'] = fn_parse_aws_cloudwatch_log_subscription_message
+	t['parse_duration'] = fn_parse_duration
+	t['parse_bytes'] = fn_parse_bytes
+	t['parse_int'] = fn_parse_int
+	t['parse_float'] = fn_parse_float
+	t['format_int'] = fn_format_int
+	t['parse_timestamp'] = fn_parse_timestamp
+	t['format_timestamp'] = fn_format_timestamp
+	// Type
+	t['is_empty'] = fn_is_empty
+	t['is_json'] = fn_is_json
+	t['is_regex'] = fn_is_regex
+	t['is_timestamp'] = fn_is_timestamp
+	t['is_ipv4'] = fn_is_ipv4
+	t['is_ipv6'] = fn_is_ipv6
+	t['timestamp'] = fn_timestamp
+	t['tag_types_externally'] = fn_tag_types_externally
+	// Enumerate
+	t['tally'] = fn_tally
+	t['tally_value'] = fn_tally_value
+	t['match_array'] = fn_match_array
+	// IP
+	t['ip_aton'] = fn_ip_aton
+	t['ip_ntoa'] = fn_ip_ntoa
+	t['ip_cidr_contains'] = fn_ip_cidr_contains
+	t['ip_subnet'] = fn_ip_subnet
+	t['ip_to_ipv6'] = fn_ip_to_ipv6
+	t['ipv6_to_ipv4'] = fn_ipv6_to_ipv4
+	t['ip_version'] = fn_ip_version
+	// Convert
+	t['to_syslog_level'] = fn_to_syslog_level
+	t['to_syslog_severity'] = fn_to_syslog_severity
+	t['to_syslog_facility'] = fn_to_syslog_facility
+	t['to_syslog_facility_code'] = fn_to_syslog_facility_code
+	// Object
+	t['unnest'] = fn_unnest
+	t['object_from_array'] = fn_object_from_array
+	t['zip'] = fn_zip
+	t['remove'] = fn_remove
+	// Array
+	t['chunks'] = fn_chunks
+	// Random
+	t['random_int'] = fn_random_int
+	t['random_float'] = fn_random_float
+	t['random_bool'] = fn_random_bool_w
+	t['random_bytes'] = fn_random_bytes
+	t['uuid_v7'] = fn_uuid_v7
+	t['get_hostname'] = fn_get_hostname_w
+	t['get_timezone_name'] = fn_get_timezone_name
+	t['haversine'] = fn_haversine
+	t['redact'] = fn_redact
+	t['match_datadog_query'] = fn_match_datadog_query
+	t['parse_grok'] = fn_parse_grok
+	t['parse_groks'] = fn_parse_groks
+	// New parsers
+	t['parse_apache_log'] = fn_parse_apache_log
+	t['parse_nginx_log'] = fn_parse_nginx_log
+	t['parse_aws_alb_log'] = fn_parse_aws_alb_log
+	t['parse_aws_vpc_flow_log'] = fn_parse_aws_vpc_flow_log
+	t['parse_cef'] = fn_parse_cef
+	t['parse_glog'] = fn_parse_glog
+	t['parse_influxdb'] = fn_parse_influxdb
+	t['parse_ruby_hash'] = fn_parse_ruby_hash
+	t['parse_xml'] = fn_parse_xml
+	t['parse_cbor'] = fn_parse_cbor
+	t['parse_user_agent'] = fn_parse_user_agent
+	// Protobuf
+	t['parse_proto'] = fn_parse_proto
+	t['encode_proto'] = fn_encode_proto
+	// IP binary
+	t['ip_ntop'] = fn_ip_ntop
+	t['ip_pton'] = fn_ip_pton
+	// DNS
+	t['reverse_dns'] = fn_reverse_dns
+	// Misc
+	t['uuid_from_friendly_id'] = fn_uuid_from_friendly_id
+	t['validate_json_schema'] = fn_validate_json_schema
+	// Encrypt/Decrypt
+	t['encrypt'] = fn_encrypt
+	t['decrypt'] = fn_decrypt
+	t['encrypt_ip'] = fn_encrypt_ip
+	t['decrypt_ip'] = fn_decrypt_ip
+	// HTTP
+	t['http_request'] = fn_http_request
+	return t
+}
+
+// eval_fn_call_positional dispatches a VRL function by name using the dispatch table.
 fn (mut rt Runtime) eval_fn_call_positional(name string, args []VrlValue) !VrlValue {
-	match name {
-		'to_string' { return fn_to_string(args) }
-		'downcase' { return fn_downcase(args) }
-		'upcase' { return fn_upcase(args) }
-		'contains' { return fn_contains(args) }
-		'starts_with' { return fn_starts_with(args) }
-		'ends_with' { return fn_ends_with(args) }
-		'length' { return fn_length(args) }
-		'strip_whitespace', 'trim' { return fn_strip_whitespace(args) }
-		'replace' { return fn_replace(args) }
-		'slice' { return fn_slice(args) }
-		'split' { return fn_split(args) }
-		'join' { return fn_join(args) }
-		'strlen' { return fn_strlen(args) }
-		'truncate' { return fn_truncate(args) }
-		'to_int', 'int' { return fn_to_int(args) }
-		'to_float', 'float' { return fn_to_float(args) }
-		'to_bool', 'bool' { return fn_to_bool(args) }
-		'string' { return fn_string(args) }
-		'is_nullish' { return fn_is_nullish(args) }
-		'is_string' { return fn_is_type(args, 'string') }
-		'is_integer' { return fn_is_type(args, 'integer') }
-		'is_float' { return fn_is_type(args, 'float') }
-		'is_boolean' { return fn_is_type(args, 'boolean') }
-		'is_null' { return fn_is_type(args, 'null') }
-		'is_array' { return fn_is_type(args, 'array') }
-		'is_object' { return fn_is_type(args, 'object') }
-		'keys' { return fn_keys(args) }
-		'values' { return fn_values(args) }
-		'flatten' { return fn_flatten(args) }
-		'unflatten' { return fn_unflatten(args) }
-		'merge' { return fn_merge(args) }
-		'compact' { return fn_compact(args) }
-		'push' { return fn_push(args) }
-		'append' { return fn_append(args) }
-		'encode_json' { return fn_encode_json(args) }
-		'decode_json', 'parse_json' { return fn_decode_json(args) }
-		'abs' { return fn_abs(args) }
-		'ceil' { return fn_ceil(args) }
-		'floor' { return fn_floor(args) }
-		'round' { return fn_round(args) }
-		'mod' { return fn_mod(args) }
-		'format_number' { return fn_format_number(args) }
-		'match' { return fn_match(args) }
-		'match_any' { return fn_match_any(args) }
-		'includes' { return fn_includes(args) }
-		'contains_all' { return fn_contains_all(args) }
-		'find' { return fn_find(args) }
-		'get' { return fn_get(args) }
-		'set' { return fn_set(args) }
-		'unique' { return fn_unique(args) }
-		'pop' { return fn_pop(args) }
-		'to_regex' { return fn_to_regex(args) }
-		'from_unix_timestamp' { return fn_from_unix_timestamp(args) }
-		'to_unix_timestamp' { return fn_to_unix_timestamp(args) }
-		'assert' { return fn_assert(args) }
-		'assert_eq' { return fn_assert_eq(args) }
-		'array' { return fn_ensure_array(args) }
-		'object' { return fn_ensure_object(args) }
-		'log' { return VrlValue(VrlNull{}) }
-		'now' { return VrlValue(Timestamp{t: time.now()}) }
-		'uuid_v4' { return fn_uuid_v4() }
-		'get_env_var' { return fn_get_env_var(args) }
-		// Codec
-		'encode_base64' { return fn_encode_base64(args) }
-		'decode_base64' { return fn_decode_base64(args) }
-		'encode_base16' { return fn_encode_base16(args) }
-		'decode_base16' { return fn_decode_base16(args) }
-		'encode_percent' { return fn_encode_percent(args) }
-		'decode_percent' { return fn_decode_percent(args) }
-		'encode_csv' { return fn_encode_csv(args) }
-		'encode_key_value' { return fn_encode_key_value(args) }
-		'encode_logfmt' { return fn_encode_logfmt(args) }
-		'decode_mime_q' { return fn_decode_mime_q(args) }
-		'encode_zlib' { return fn_encode_zlib(args) }
-		'decode_zlib' { return fn_decode_zlib(args) }
-		'encode_gzip' { return fn_encode_gzip(args) }
-		'decode_gzip' { return fn_decode_gzip(args) }
-		'encode_zstd' { return fn_encode_zstd(args) }
-		'decode_zstd' { return fn_decode_zstd(args) }
-		'encode_punycode' { return fn_encode_punycode(args) }
-		'decode_punycode' { return fn_decode_punycode(args) }
-		// Crypto
-		'sha1' { return fn_sha1(args) }
-		'sha2' { return fn_sha2(args) }
-		'sha3' { return fn_sha3(args) }
-		'md5' { return fn_md5(args) }
-		'hmac' { return fn_hmac(args) }
-		'crc32' { return fn_crc32(args) }
-		'seahash' { return fn_seahash(args) }
-		'xxhash' { return fn_xxhash(args) }
-		'crc' { return fn_crc(args) }
-		// Codec
-		'encode_snappy' { return fn_encode_snappy(args) }
-		'decode_snappy' { return fn_decode_snappy(args) }
-		'encode_lz4' { return fn_encode_lz4(args) }
-		'decode_lz4' { return fn_decode_lz4(args) }
-		// String
-		'camelcase' { return fn_camelcase(args) }
-		'pascalcase' { return fn_pascalcase(args) }
-		'snakecase' { return fn_snakecase(args) }
-		'kebabcase' { return fn_kebabcase(args) }
-		'screamingsnakecase' { return fn_screamingsnakecase(args) }
-		'basename' { return fn_basename(args) }
-		'dirname' { return fn_dirname(args) }
-		'split_path' { return fn_split_path(args) }
-		'strip_ansi_escape_codes' { return fn_strip_ansi_escape_codes(args) }
-		'shannon_entropy' { return fn_shannon_entropy(args) }
-		'sieve' { return fn_sieve(args) }
-		// Parse
-		'parse_regex' { return fn_parse_regex(args) }
-		'parse_regex_all' { return fn_parse_regex_all(args) }
-		'parse_key_value' { return fn_parse_key_value(args) }
-		'parse_logfmt' { return fn_parse_logfmt(args) }
-		'parse_klog' { return fn_parse_klog(args) }
-		'parse_linux_authorization' { return fn_parse_linux_authorization(args) }
-		'parse_csv' { return fn_parse_csv(args) }
-		'parse_url' { return fn_parse_url(args) }
-		'parse_etld' { return fn_parse_etld(args, map[string]VrlValue{}) }
-		'parse_query_string' { return fn_parse_query_string(args) }
-		'parse_tokens' { return fn_parse_tokens(args) }
-		'parse_common_log' { return fn_parse_common_log(args) }
-		'parse_yaml' { return fn_parse_yaml(args) }
-		'parse_syslog' { return fn_parse_syslog(args) }
-		'parse_aws_cloudwatch_log_subscription_message' { return fn_parse_aws_cloudwatch_log_subscription_message(args) }
-		'parse_duration' { return fn_parse_duration(args) }
-		'parse_bytes' { return fn_parse_bytes(args) }
-		'parse_int' { return fn_parse_int(args) }
-		'parse_float' { return fn_parse_float(args) }
-		'format_int' { return fn_format_int(args) }
-		'parse_timestamp' { return fn_parse_timestamp(args) }
-		'format_timestamp' { return fn_format_timestamp(args) }
-		// Type
-		'is_empty' { return fn_is_empty(args) }
-		'is_json' { return fn_is_json(args) }
-		'is_regex' { return fn_is_regex(args) }
-		'is_timestamp' { return fn_is_timestamp(args) }
-		'is_ipv4' { return fn_is_ipv4(args) }
-		'is_ipv6' { return fn_is_ipv6(args) }
-		'timestamp' { return fn_timestamp(args) }
-		'tag_types_externally' { return fn_tag_types_externally(args) }
-		// Enumerate
-		'tally' { return fn_tally(args) }
-		'tally_value' { return fn_tally_value(args) }
-		'match_array' { return fn_match_array(args) }
-		// IP
-		'ip_aton' { return fn_ip_aton(args) }
-		'ip_ntoa' { return fn_ip_ntoa(args) }
-		'ip_cidr_contains' { return fn_ip_cidr_contains(args) }
-		'ip_subnet' { return fn_ip_subnet(args) }
-		'ip_to_ipv6' { return fn_ip_to_ipv6(args) }
-		'ipv6_to_ipv4' { return fn_ipv6_to_ipv4(args) }
-		'ip_version' { return fn_ip_version(args) }
-		// Convert
-		'to_syslog_level' { return fn_to_syslog_level(args) }
-		'to_syslog_severity' { return fn_to_syslog_severity(args) }
-		'to_syslog_facility' { return fn_to_syslog_facility(args) }
-		'to_syslog_facility_code' { return fn_to_syslog_facility_code(args) }
-		// Object
-		'unnest' { return fn_unnest(args) }
-		'object_from_array' { return fn_object_from_array(args) }
-		'zip' { return fn_zip(args) }
-		'remove' { return fn_remove(args) }
-		// Array
-		'chunks' { return fn_chunks(args) }
-		// Random
-		'random_int' { return fn_random_int(args) }
-		'random_float' { return fn_random_float(args) }
-		'random_bool' { return fn_random_bool() }
-		'random_bytes' { return fn_random_bytes(args) }
-		'uuid_v7' { return fn_uuid_v7(args) }
-		'get_hostname' { return fn_get_hostname() }
-		'get_timezone_name' { return fn_get_timezone_name(args) }
-		'haversine' { return fn_haversine(args) }
-		'redact' { return fn_redact(args) }
-		'match_datadog_query' { return fn_match_datadog_query(args) }
-		'parse_grok' { return fn_parse_grok(args) }
-		'parse_groks' { return fn_parse_groks(args) }
-		// New parsers
-		'parse_apache_log' { return fn_parse_apache_log(args) }
-		'parse_nginx_log' { return fn_parse_nginx_log(args) }
-		'parse_aws_alb_log' { return fn_parse_aws_alb_log(args) }
-		'parse_aws_vpc_flow_log' { return fn_parse_aws_vpc_flow_log(args) }
-		'parse_cef' { return fn_parse_cef(args) }
-		'parse_glog' { return fn_parse_glog(args) }
-		'parse_influxdb' { return fn_parse_influxdb(args) }
-		'parse_ruby_hash' { return fn_parse_ruby_hash(args) }
-		'parse_xml' { return fn_parse_xml(args) }
-		'parse_cbor' { return fn_parse_cbor(args) }
-		'parse_user_agent' { return fn_parse_user_agent(args) }
-		// Protobuf
-		'parse_proto' { return fn_parse_proto(args) }
-		'encode_proto' { return fn_encode_proto(args) }
-		// IP binary
-		'ip_ntop' { return fn_ip_ntop(args) }
-		'ip_pton' { return fn_ip_pton(args) }
-		// DNS
-		'reverse_dns' { return fn_reverse_dns(args) }
-		// Misc
-		'uuid_from_friendly_id' { return fn_uuid_from_friendly_id(args) }
-		'validate_json_schema' { return fn_validate_json_schema(args) }
-		// Encrypt/Decrypt
-		'encrypt' { return fn_encrypt(args) }
-		'decrypt' { return fn_decrypt(args) }
-		'encrypt_ip' { return fn_encrypt_ip(args) }
-		'decrypt_ip' { return fn_decrypt_ip(args) }
-		// HTTP
-		'http_request' { return fn_http_request(args) }
-		else { return error('unknown function: ${name}') }
+	if handler := vrl_fn_dispatch[name] {
+		return handler(args)
 	}
+	return error('unknown function: ${name}')
 }
 
 fn fn_compact_named(v VrlValue, named map[string]VrlValue) !VrlValue {
@@ -841,7 +876,7 @@ fn validate_fn_args(name string, expr FnCallExpr) ! {
 fn validate_fn_keywords(name string, expr FnCallExpr) ! {
 	valid := fn_valid_keywords(name)
 	if valid.len == 0 { return }
-	for i, arg_name in expr.arg_names {
+	for _, arg_name in expr.arg_names {
 		if arg_name.len > 0 && arg_name !in valid {
 			return error('unknown keyword argument "${arg_name}" for function "${name}"')
 		}
@@ -879,7 +914,7 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 		return rt.eval_fn_call_named(name, expr)
 	}
 
-	// Fast path for common 1-arg functions: evaluate arg directly without []VrlValue alloc
+	// Fast path for 1-arg type checks: avoid array allocation for trivial checks
 	if expr.args.len == 1 {
 		a0 := rt.eval(expr.args[0])!
 		match name {
@@ -897,15 +932,6 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 					else { return error('expected string, got ${vrl_type_name(v)}') }
 				}
 			}
-			'to_string' { return fn_to_string([a0]) }
-		'format_number' { return fn_format_number([a0]) }
-			'to_int', 'int' { return fn_to_int([a0]) }
-			'to_float', 'float' { return fn_to_float([a0]) }
-			'to_bool', 'bool' { return fn_to_bool([a0]) }
-			'string' { return fn_string([a0]) }
-			'length' { return fn_length([a0]) }
-			'strlen' { return fn_strlen([a0]) }
-			'strip_whitespace', 'trim' { return fn_strip_whitespace([a0]) }
 			'is_string' { return VrlValue(a0 is string) }
 			'is_integer' { return VrlValue(a0 is i64) }
 			'is_float' { return VrlValue(a0 is f64) }
@@ -913,330 +939,19 @@ fn (mut rt Runtime) eval_fn_call(expr FnCallExpr) !VrlValue {
 			'is_null' { return VrlValue(a0 is VrlNull) }
 			'is_array' { return VrlValue(a0 is []VrlValue) }
 			'is_object' { return VrlValue(a0 is ObjectMap) }
-			'is_nullish' { return fn_is_nullish([a0]) }
-			'encode_json' { return fn_encode_json([a0]) }
-			'decode_json', 'parse_json' { return fn_decode_json([a0]) }
-			'keys' { return fn_keys([a0]) }
-			'values' { return fn_values([a0]) }
-			'flatten' { return fn_flatten([a0]) }
-			'unflatten' { return fn_unflatten([a0]) }
-			'compact' { return fn_compact([a0]) }
-			'abs' { return fn_abs([a0]) }
-			'ceil' { return fn_ceil([a0]) }
-			'floor' { return fn_floor([a0]) }
-			'round' { return fn_round([a0]) }
-			'array' { return fn_ensure_array([a0]) }
-			'object' { return fn_ensure_object([a0]) }
-			'is_empty' { return fn_is_empty([a0]) }
-			'is_regex' { return fn_is_regex([a0]) }
-			'is_timestamp' { return fn_is_timestamp([a0]) }
-			'timestamp' { return fn_timestamp([a0]) }
-			'camelcase' { return fn_camelcase([a0]) }
-			'pascalcase' { return fn_pascalcase([a0]) }
-			'snakecase' { return fn_snakecase([a0]) }
-			'kebabcase' { return fn_kebabcase([a0]) }
-			'screamingsnakecase' { return fn_screamingsnakecase([a0]) }
-			'basename' { return fn_basename([a0]) }
-			'dirname' { return fn_dirname([a0]) }
-			'split_path' { return fn_split_path([a0]) }
-			'strip_ansi_escape_codes' { return fn_strip_ansi_escape_codes([a0]) }
-			'encode_base64' { return fn_encode_base64([a0]) }
-			'decode_base64' { return fn_decode_base64([a0]) }
-			'encode_base16' { return fn_encode_base16([a0]) }
-			'decode_base16' { return fn_decode_base16([a0]) }
-			'encode_percent' { return fn_encode_percent([a0]) }
-			'decode_percent' { return fn_decode_percent([a0]) }
-			'encode_logfmt' { return fn_encode_logfmt([a0]) }
-			'encode_csv' { return fn_encode_csv([a0]) }
-			'decode_mime_q' { return fn_decode_mime_q([a0]) }
-			'encode_zlib' { return fn_encode_zlib([a0]) }
-			'decode_zlib' { return fn_decode_zlib([a0]) }
-			'encode_gzip' { return fn_encode_gzip([a0]) }
-			'decode_gzip' { return fn_decode_gzip([a0]) }
-			'encode_zstd' { return fn_encode_zstd([a0]) }
-			'decode_zstd' { return fn_decode_zstd([a0]) }
-			'encode_punycode' { return fn_encode_punycode([a0]) }
-			'decode_punycode' { return fn_decode_punycode([a0]) }
-			'sha1' { return fn_sha1([a0]) }
-			'md5' { return fn_md5([a0]) }
-			'crc32' { return fn_crc32([a0]) }
-			'seahash' { return fn_seahash([a0]) }
-			'xxhash' { return fn_xxhash([a0]) }
-			'crc' { return fn_crc([a0]) }
-			'encode_snappy' { return fn_encode_snappy([a0]) }
-			'decode_snappy' { return fn_decode_snappy([a0]) }
-			'encode_lz4' { return fn_encode_lz4([a0]) }
-			'decode_lz4' { return fn_decode_lz4([a0]) }
-			'parse_float' { return fn_parse_float([a0]) }
-			'tag_types_externally' { return fn_tag_types_externally([a0]) }
-			'tally' { return fn_tally([a0]) }
-			'tally_value' { return fn_tally_value([a0]) }
-			'parse_tokens' { return fn_parse_tokens([a0]) }
-			'parse_common_log' { return fn_parse_common_log([a0]) }
-			'parse_yaml' { return fn_parse_yaml([a0]) }
-			'parse_syslog' { return fn_parse_syslog([a0]) }
-			'parse_logfmt' { return fn_parse_logfmt([a0]) }
-			'parse_klog' { return fn_parse_klog([a0]) }
-			'parse_linux_authorization' { return fn_parse_linux_authorization([a0]) }
-			'parse_aws_cloudwatch_log_subscription_message' { return fn_parse_aws_cloudwatch_log_subscription_message([a0]) }
-			'parse_glog' { return fn_parse_glog([a0]) }
-			'parse_aws_alb_log' { return fn_parse_aws_alb_log([a0]) }
-			'parse_influxdb' { return fn_parse_influxdb([a0]) }
-			'parse_ruby_hash' { return fn_parse_ruby_hash([a0]) }
-			'parse_xml' { return fn_parse_xml([a0]) }
-			'parse_cbor' { return fn_parse_cbor([a0]) }
-			'parse_user_agent' { return fn_parse_user_agent([a0]) }
-			'get_timezone_name' { return fn_get_timezone_name([a0]) }
-			'parse_url' { return fn_parse_url([a0]) }
-			'parse_etld' { return fn_parse_etld([a0], map[string]VrlValue{}) }
-			'parse_query_string' { return fn_parse_query_string([a0]) }
-			'parse_bytes' { return fn_parse_bytes([a0]) }
-			'unnest' { return fn_unnest([a0]) }
-			'is_ipv4' { return fn_is_ipv4([a0]) }
-			'is_ipv6' { return fn_is_ipv6([a0]) }
-			'ip_version' { return fn_ip_version([a0]) }
-			// map_keys and map_values are handled above as special functions
 			else {}
 		}
-		// Fall through to 2-arg path or general path
+		// Fall through to general dispatch with pre-evaluated arg
+		return rt.eval_fn_call_positional(name, [a0])
 	}
 
-	// Fast path for common 2-arg functions
-	if expr.args.len == 2 {
-		a0 := if expr.args.len >= 1 { rt.eval(expr.args[0])! } else { VrlValue(VrlNull{}) }
-		a1 := rt.eval(expr.args[1])!
-		match name {
-			'contains' { return fn_contains([a0, a1]) }
-			'starts_with' { return fn_starts_with([a0, a1]) }
-			'ends_with' { return fn_ends_with([a0, a1]) }
-			'split' { return fn_split([a0, a1]) }
-			'join' { return fn_join([a0, a1]) }
-			'merge' { return fn_merge([a0, a1]) }
-			'push' { return fn_push([a0, a1]) }
-			'append' { return fn_append([a0, a1]) }
-			'mod' { return fn_mod([a0, a1]) }
-			'slice' { return fn_slice([a0, a1]) }
-			'truncate' { return fn_truncate([a0, a1]) }
-			'encode_zlib' { return fn_encode_zlib([a0, a1]) }
-			'encode_gzip' { return fn_encode_gzip([a0, a1]) }
-			'encode_zstd' { return fn_encode_zstd([a0, a1]) }
-			'redact' { return fn_redact([a0, a1]) }
-			'match_datadog_query' { return fn_match_datadog_query([a0, a1]) }
-			else {}
-		}
-	}
-
-	// General path: evaluate all args into array
+	// General path: evaluate all args and use the dispatch table
 	mut args := []VrlValue{}
 	for arg in expr.args {
 		val := rt.eval(arg)!
 		args << val
 	}
-
-	match name {
-		'to_string' { return fn_to_string(args) }
-		'downcase' { return fn_downcase(args) }
-		'upcase' { return fn_upcase(args) }
-		'contains' { return fn_contains(args) }
-		'starts_with' { return fn_starts_with(args) }
-		'ends_with' { return fn_ends_with(args) }
-		'length' { return fn_length(args) }
-		'strip_whitespace', 'trim' { return fn_strip_whitespace(args) }
-		'replace' { return fn_replace(args) }
-		'slice' { return fn_slice(args) }
-		'split' { return fn_split(args) }
-		'join' { return fn_join(args) }
-		'strlen' { return fn_strlen(args) }
-		'truncate' { return fn_truncate(args) }
-		'to_int', 'int' { return fn_to_int(args) }
-		'to_float', 'float' { return fn_to_float(args) }
-		'to_bool', 'bool' { return fn_to_bool(args) }
-		'string' { return fn_string(args) }
-		'is_string' { return fn_is_type(args, 'string') }
-		'is_integer' { return fn_is_type(args, 'integer') }
-		'is_float' { return fn_is_type(args, 'float') }
-		'is_boolean' { return fn_is_type(args, 'boolean') }
-		'is_null' { return fn_is_type(args, 'null') }
-		'is_array' { return fn_is_type(args, 'array') }
-		'is_object' { return fn_is_type(args, 'object') }
-		'is_nullish' { return fn_is_nullish(args) }
-		'keys' { return fn_keys(args) }
-		'values' { return fn_values(args) }
-		'flatten' { return fn_flatten(args) }
-		'unflatten' { return fn_unflatten(args) }
-		'merge' { return fn_merge(args) }
-		'compact' { return fn_compact(args) }
-		'push' { return fn_push(args) }
-		'append' { return fn_append(args) }
-		// map_keys and map_values handled as special functions above
-		'encode_json' { return fn_encode_json(args) }
-		'decode_json', 'parse_json' { return fn_decode_json(args) }
-		'abs' { return fn_abs(args) }
-		'ceil' { return fn_ceil(args) }
-		'floor' { return fn_floor(args) }
-		'round' { return fn_round(args) }
-		'mod' { return fn_mod(args) }
-		'assert' { return fn_assert(args) }
-		'assert_eq' { return fn_assert_eq(args) }
-		'now' { return VrlValue(Timestamp{t: time.now()}) }
-		'format_number' { return fn_format_number(args) }
-		'to_unix_timestamp' { return fn_to_unix_timestamp(args) }
-		'get_env_var' { return fn_get_env_var(args) }
-		'uuid_v4' { return fn_uuid_v4() }
-		'array' { return fn_ensure_array(args) }
-		'object' { return fn_ensure_object(args) }
-		'pop' { return fn_pop(args) }
-		'match' { return fn_match(args) }
-		'match_any' { return fn_match_any(args) }
-		'includes' { return fn_includes(args) }
-		'contains_all' { return fn_contains_all(args) }
-		'find' { return fn_find(args) }
-		'get' { return fn_get(args) }
-		'set' { return fn_set(args) }
-		'unique' { return fn_unique(args) }
-		'to_regex' { return fn_to_regex(args) }
-		'log' { return VrlValue(VrlNull{}) }  // log() is a no-op in our runtime
-		'from_unix_timestamp' { return fn_from_unix_timestamp(args) }
-		// Codec
-		'encode_base64' { return fn_encode_base64(args) }
-		'decode_base64' { return fn_decode_base64(args) }
-		'encode_base16' { return fn_encode_base16(args) }
-		'decode_base16' { return fn_decode_base16(args) }
-		'encode_percent' { return fn_encode_percent(args) }
-		'decode_percent' { return fn_decode_percent(args) }
-		'encode_csv' { return fn_encode_csv(args) }
-		'encode_key_value' { return fn_encode_key_value(args) }
-		'encode_logfmt' { return fn_encode_logfmt(args) }
-		'decode_mime_q' { return fn_decode_mime_q(args) }
-		'encode_zlib' { return fn_encode_zlib(args) }
-		'decode_zlib' { return fn_decode_zlib(args) }
-		'encode_gzip' { return fn_encode_gzip(args) }
-		'decode_gzip' { return fn_decode_gzip(args) }
-		'encode_zstd' { return fn_encode_zstd(args) }
-		'decode_zstd' { return fn_decode_zstd(args) }
-		'encode_punycode' { return fn_encode_punycode(args) }
-		'decode_punycode' { return fn_decode_punycode(args) }
-		// Crypto
-		'sha1' { return fn_sha1(args) }
-		'sha2' { return fn_sha2(args) }
-		'sha3' { return fn_sha3(args) }
-		'md5' { return fn_md5(args) }
-		'hmac' { return fn_hmac(args) }
-		'crc32' { return fn_crc32(args) }
-		'seahash' { return fn_seahash(args) }
-		'xxhash' { return fn_xxhash(args) }
-		'crc' { return fn_crc(args) }
-		// Codec
-		'encode_snappy' { return fn_encode_snappy(args) }
-		'decode_snappy' { return fn_decode_snappy(args) }
-		'encode_lz4' { return fn_encode_lz4(args) }
-		'decode_lz4' { return fn_decode_lz4(args) }
-		// String
-		'camelcase' { return fn_camelcase(args) }
-		'pascalcase' { return fn_pascalcase(args) }
-		'snakecase' { return fn_snakecase(args) }
-		'kebabcase' { return fn_kebabcase(args) }
-		'screamingsnakecase' { return fn_screamingsnakecase(args) }
-		'basename' { return fn_basename(args) }
-		'dirname' { return fn_dirname(args) }
-		'split_path' { return fn_split_path(args) }
-		'strip_ansi_escape_codes' { return fn_strip_ansi_escape_codes(args) }
-		'shannon_entropy' { return fn_shannon_entropy(args) }
-		'sieve' { return fn_sieve(args) }
-		// Parse
-		'parse_regex' { return fn_parse_regex(args) }
-		'parse_regex_all' { return fn_parse_regex_all(args) }
-		'parse_key_value' { return fn_parse_key_value(args) }
-		'parse_logfmt' { return fn_parse_logfmt(args) }
-		'parse_klog' { return fn_parse_klog(args) }
-		'parse_linux_authorization' { return fn_parse_linux_authorization(args) }
-		'parse_csv' { return fn_parse_csv(args) }
-		'parse_url' { return fn_parse_url(args) }
-		'parse_etld' { return fn_parse_etld(args, map[string]VrlValue{}) }
-		'parse_query_string' { return fn_parse_query_string(args) }
-		'parse_tokens' { return fn_parse_tokens(args) }
-		'parse_common_log' { return fn_parse_common_log(args) }
-		'parse_yaml' { return fn_parse_yaml(args) }
-		'parse_syslog' { return fn_parse_syslog(args) }
-		'parse_aws_cloudwatch_log_subscription_message' { return fn_parse_aws_cloudwatch_log_subscription_message(args) }
-		'parse_duration' { return fn_parse_duration(args) }
-		'parse_bytes' { return fn_parse_bytes(args) }
-		'parse_int' { return fn_parse_int(args) }
-		'parse_float' { return fn_parse_float(args) }
-		'format_int' { return fn_format_int(args) }
-		'parse_timestamp' { return fn_parse_timestamp(args) }
-		'format_timestamp' { return fn_format_timestamp(args) }
-		// Type
-		'is_empty' { return fn_is_empty(args) }
-		'is_json' { return fn_is_json(args) }
-		'is_regex' { return fn_is_regex(args) }
-		'is_timestamp' { return fn_is_timestamp(args) }
-		'is_ipv4' { return fn_is_ipv4(args) }
-		'is_ipv6' { return fn_is_ipv6(args) }
-		'timestamp' { return fn_timestamp(args) }
-		'tag_types_externally' { return fn_tag_types_externally(args) }
-		// Enumerate
-		'tally' { return fn_tally(args) }
-		'tally_value' { return fn_tally_value(args) }
-		'match_array' { return fn_match_array(args) }
-		// IP
-		'ip_aton' { return fn_ip_aton(args) }
-		'ip_ntoa' { return fn_ip_ntoa(args) }
-		'ip_cidr_contains' { return fn_ip_cidr_contains(args) }
-		'ip_subnet' { return fn_ip_subnet(args) }
-		'ip_to_ipv6' { return fn_ip_to_ipv6(args) }
-		'ipv6_to_ipv4' { return fn_ipv6_to_ipv4(args) }
-		'ip_version' { return fn_ip_version(args) }
-		// Convert
-		'to_syslog_level' { return fn_to_syslog_level(args) }
-		'to_syslog_severity' { return fn_to_syslog_severity(args) }
-		'to_syslog_facility' { return fn_to_syslog_facility(args) }
-		'to_syslog_facility_code' { return fn_to_syslog_facility_code(args) }
-		// Object
-		'unnest' { return fn_unnest(args) }
-		'object_from_array' { return fn_object_from_array(args) }
-		'zip' { return fn_zip(args) }
-		'remove' { return fn_remove(args) }
-		// Array
-		'chunks' { return fn_chunks(args) }
-		// Random
-		'random_int' { return fn_random_int(args) }
-		'random_float' { return fn_random_float(args) }
-		'random_bool' { return fn_random_bool() }
-		'random_bytes' { return fn_random_bytes(args) }
-		'uuid_v7' { return fn_uuid_v7(args) }
-		'get_hostname' { return fn_get_hostname() }
-		'get_timezone_name' { return fn_get_timezone_name(args) }
-		'haversine' { return fn_haversine(args) }
-		// Redact
-		'redact' { return fn_redact(args) }
-		// Datadog query matching
-		'match_datadog_query' { return fn_match_datadog_query(args) }
-		// Grok
-		'parse_grok' { return fn_parse_grok(args) }
-		'parse_groks' { return fn_parse_groks(args) }
-		// New parsers
-		'parse_apache_log' { return fn_parse_apache_log(args) }
-		'parse_nginx_log' { return fn_parse_nginx_log(args) }
-		'parse_aws_alb_log' { return fn_parse_aws_alb_log(args) }
-		'parse_aws_vpc_flow_log' { return fn_parse_aws_vpc_flow_log(args) }
-		'parse_cef' { return fn_parse_cef(args) }
-		'parse_glog' { return fn_parse_glog(args) }
-		'parse_influxdb' { return fn_parse_influxdb(args) }
-		'parse_ruby_hash' { return fn_parse_ruby_hash(args) }
-		'parse_xml' { return fn_parse_xml(args) }
-		'parse_cbor' { return fn_parse_cbor(args) }
-		'parse_user_agent' { return fn_parse_user_agent(args) }
-		// Protobuf
-		'parse_proto' { return fn_parse_proto(args) }
-		'encode_proto' { return fn_encode_proto(args) }
-		// Encrypt/Decrypt
-		'encrypt' { return fn_encrypt(args) }
-		'decrypt' { return fn_decrypt(args) }
-		'encrypt_ip' { return fn_encrypt_ip(args) }
-		'decrypt_ip' { return fn_decrypt_ip(args) }
-		else { return error('unknown function: ${name}') }
-	}
+	return rt.eval_fn_call_positional(name, args)
 }
 
 // String functions

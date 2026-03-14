@@ -12,7 +12,7 @@ module vrl
 //
 // The interpreter (with optimizations like fast single-segment path access,
 // direct structural equality, byte-level operator dispatch, and inlined
-// stdlib fast paths) already matches or beats the upstream Rust VRL
+// vrllib fast paths) already matches or beats the upstream Rust VRL
 // implementation on most benchmarks when compiled with -prod -cc clang.
 //
 // Benchmark results (100K iterations, -prod -cc clang vs Rust --release):

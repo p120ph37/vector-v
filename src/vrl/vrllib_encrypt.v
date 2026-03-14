@@ -675,7 +675,7 @@ fn fn_decrypt_ip(args []VrlValue) !VrlValue {
 }
 
 // ============================================================================
-// IP address parsing helpers (prefixed to avoid name collision with stdlib_ip)
+// IP address parsing helpers (prefixed to avoid name collision with vrllib_ip)
 // ============================================================================
 
 fn enc_parse_ipv4(s string) ![]u8 {

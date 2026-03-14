@@ -83,19 +83,45 @@ def load_all_data(cov_dir):
     # A source file may appear under multiple fhashes (different compilations).
     # Each compilation maps point indices to source line numbers.
     # We union the line sets across all compilations.
+    #
+    # V compiler bug workaround: when a source file is compiled in different
+    # test modules, the metadata may record different numbers of points for
+    # the same file (e.g. 2134 vs 7), even though the counter CSV actually
+    # tracks all points. We find the "best" metadata (most points) for each
+    # file and use it to interpret counters from ALL fhashes of that file.
     file_coverage = {}  # filepath -> {"lines": set, "hit_lines": set}
 
+    # Group fhashes by source file
+    file_fhashes = {}  # filepath -> list of fhashes
     for fhash, info in meta.items():
         filepath = info["file"]
-        points = info["points"]  # list of source line numbers
+        file_fhashes.setdefault(filepath, []).append(fhash)
 
-        if filepath not in file_coverage:
-            file_coverage[filepath] = {"lines": set(), "hit_lines": set()}
+    for filepath, fhashes in file_fhashes.items():
+        # Find the metadata with the most points for this file
+        best_fhash = max(fhashes, key=lambda fh: len(meta[fh]["points"]))
+        best_points = meta[best_fhash]["points"]
 
-        for i, line_no in enumerate(points):
+        file_coverage[filepath] = {"lines": set(), "hit_lines": set()}
+
+        # Register all instrumented lines from the best metadata
+        for line_no in best_points:
             file_coverage[filepath]["lines"].add(line_no)
-            if hits.get((fhash, i), 0) > 0:
-                file_coverage[filepath]["hit_lines"].add(line_no)
+
+        # Collect hits from ALL fhashes, using the best metadata's
+        # point-to-line mapping (point indices are compatible across
+        # compilations of the same file)
+        for fhash in fhashes:
+            for i, line_no in enumerate(meta[fhash]["points"]):
+                if hits.get((fhash, i), 0) > 0:
+                    file_coverage[filepath]["hit_lines"].add(line_no)
+            # Also check for counter entries beyond the metadata's own
+            # point list — the V compiler may emit counters using indices
+            # from the full instrumentation even when metadata is truncated
+            if fhash != best_fhash and len(meta[fhash]["points"]) < len(best_points):
+                for i, line_no in enumerate(best_points):
+                    if hits.get((fhash, i), 0) > 0:
+                        file_coverage[filepath]["hit_lines"].add(line_no)
 
     return file_coverage
 
