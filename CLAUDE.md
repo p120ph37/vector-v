@@ -14,6 +14,7 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
   - `conf/` — TOML configuration parsing
   - `api/` — REST API server (health/ready endpoints)
   - `cliargs/` — Command-line argument parsing
+  - `mockserver/` — Declarative mock HTTP server for testing network components
   - `main.v` — Entry point
 - `upstream/` — Upstream Rust source for Vector and VRL (read-only reference, git submodules)
 
@@ -123,3 +124,29 @@ We implement a minimal msgpack decoder directly in V rather than depending on an
 Upstream uses `ArcSwap` for lock-free atomic metadata updates via a background task. Our implementation refreshes metadata lazily during `transform()` when the cache expires, avoiding the complexity of V's shared memory primitives. This is simpler but means the first event after a refresh interval may see slightly higher latency.
 
 All IMDS HTTP requests use a 1-second timeout (the metadata service is on the local link). On fetch failure, the transform keeps its cached values (possibly empty) and defers the next retry until the refresh interval expires again, avoiding frequent retries while still allowing recovery from transient failures.
+
+### Mock Server Testing Framework
+
+`src/mockserver/` provides a declarative mock HTTP server for testing network-dependent components (sinks, sources, transforms, VRL functions). The server runs on `127.0.0.1` in a background thread with a kernel-assigned port (bind to port 0).
+
+```v
+import mockserver
+
+mut mock := mockserver.start(
+    mockserver.get('/health', mockserver.respond(200, '{"status":"ok"}')),
+    mockserver.put('/token',  mockserver.respond(200, 'my-token')),
+    mockserver.post('/push',  mockserver.respond(204, '')),
+)!
+defer { mock.stop() }
+
+// Make requests to mock.url() ...
+
+reqs := mock.wait_for_requests(2, 5000)  // count, timeout_ms
+assert reqs[0].method == 'PUT'
+assert reqs[0].headers['x-custom'] == 'value'
+assert reqs[0].body == '{"data":"payload"}'
+```
+
+Features: route matching by method+path, response cycling via `sequence()` for retry/refresh testing, full request capture (method, path, headers, body), `respond_with_headers()` for custom response headers, multiple concurrent servers on different ports.
+
+Used by: EC2 metadata integration tests (`src/transforms/ec2_mock_test.v`), VRL `http_request` tests (`src/vrl/vrllib_http_mock_test.v`).

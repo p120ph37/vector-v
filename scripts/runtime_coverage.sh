@@ -81,6 +81,7 @@ modules=(
     "src/topology/"
     "src/api/"
     "src/cliargs/"
+    "src/mockserver/"
     "src/vrl/"
 )
 

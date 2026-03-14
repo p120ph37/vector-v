@@ -10,7 +10,6 @@ fn uses_unimplemented_fn(src string) bool {
 		'murmur3',
 		'mezmo_patterns',
 		'reverse_dns',
-		'http_request',
 		'uuid_from_friendly_id',
 	]
 	for fn_name in unimplemented {
