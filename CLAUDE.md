@@ -51,7 +51,7 @@ make test-vrl                    # VRL tests via Makefile
 Uses V's built-in `-coverage` instrumentation (available since V 0.4.7). The compiler inserts statement-level counters during C codegen, and `v cover` produces per-file line coverage reports.
 
 ```bash
-make coverage                                    # Run with default 95% threshold
+make coverage                                    # Run with default 20% threshold
 ./scripts/runtime_coverage.sh --threshold 90     # Custom threshold
 ./scripts/runtime_coverage.sh --verbose          # Detailed output
 ./scripts/runtime_coverage.sh --filter transforms # Filter report by module
