@@ -1210,144 +1210,80 @@ fn negate_value(v VrlValue) !VrlValue {
 	}
 }
 
-fn compare_values_lt(left VrlValue, right VrlValue) !VrlValue {
+enum CompareOp {
+	lt
+	le
+	gt
+	ge
+}
+
+fn compare_ord(a f64, b f64, op CompareOp) bool {
+	return match op {
+		.lt { a < b }
+		.le { a <= b }
+		.gt { a > b }
+		.ge { a >= b }
+	}
+}
+
+fn compare_str(a string, b string, op CompareOp) bool {
+	return match op {
+		.lt { a < b }
+		.le { a <= b }
+		.gt { a > b }
+		.ge { a >= b }
+	}
+}
+
+fn compare_values(left VrlValue, right VrlValue, op CompareOp) !VrlValue {
 	l := left
 	r := right
 	match l {
 		i64 {
 			match r {
-				i64 { return VrlValue(l < r) }
-				f64 { return VrlValue(f64(l) < r) }
+				i64 { return VrlValue(compare_ord(f64(l), f64(r), op)) }
+				f64 { return VrlValue(compare_ord(f64(l), r, op)) }
 				else {}
 			}
 		}
 		f64 {
 			match r {
-				i64 { return VrlValue(l < f64(r)) }
-				f64 { return VrlValue(l < r) }
+				i64 { return VrlValue(compare_ord(l, f64(r), op)) }
+				f64 { return VrlValue(compare_ord(l, r, op)) }
 				else {}
 			}
 		}
 		string {
 			match r {
-				string { return VrlValue(l < r) }
+				string { return VrlValue(compare_str(l, r, op)) }
 				else {}
 			}
 		}
 		Timestamp {
 			match r {
-				Timestamp { return VrlValue(l.t.unix() < r.t.unix()) }
+				Timestamp { return VrlValue(compare_ord(f64(l.t.unix()), f64(r.t.unix()), op)) }
 				else {}
 			}
 		}
 		else {}
 	}
 	return error("can't compare these types")
+}
+
+fn compare_values_lt(left VrlValue, right VrlValue) !VrlValue {
+	return compare_values(left, right, .lt)
 }
 
 fn compare_values_gt(left VrlValue, right VrlValue) !VrlValue {
-	l := left
-	r := right
-	match l {
-		i64 {
-			match r {
-				i64 { return VrlValue(l > r) }
-				f64 { return VrlValue(f64(l) > r) }
-				else {}
-			}
-		}
-		f64 {
-			match r {
-				i64 { return VrlValue(l > f64(r)) }
-				f64 { return VrlValue(l > r) }
-				else {}
-			}
-		}
-		string {
-			match r {
-				string { return VrlValue(l > r) }
-				else {}
-			}
-		}
-		Timestamp {
-			match r {
-				Timestamp { return VrlValue(l.t.unix() > r.t.unix()) }
-				else {}
-			}
-		}
-		else {}
-	}
-	return error("can't compare these types")
+	return compare_values(left, right, .gt)
 }
 
 fn compare_values_le(left VrlValue, right VrlValue) !VrlValue {
-	l := left
-	r := right
-	match l {
-		i64 {
-			match r {
-				i64 { return VrlValue(l <= r) }
-				f64 { return VrlValue(f64(l) <= r) }
-				else {}
-			}
-		}
-		f64 {
-			match r {
-				i64 { return VrlValue(l <= f64(r)) }
-				f64 { return VrlValue(l <= r) }
-				else {}
-			}
-		}
-		string {
-			match r {
-				string { return VrlValue(l <= r) }
-				else {}
-			}
-		}
-		Timestamp {
-			match r {
-				Timestamp { return VrlValue(l.t.unix() <= r.t.unix()) }
-				else {}
-			}
-		}
-		else {}
-	}
-	return error("can't compare these types")
+	return compare_values(left, right, .le)
 }
 
 fn compare_values_ge(left VrlValue, right VrlValue) !VrlValue {
-	l := left
-	r := right
-	match l {
-		i64 {
-			match r {
-				i64 { return VrlValue(l >= r) }
-				f64 { return VrlValue(f64(l) >= r) }
-				else {}
-			}
-		}
-		f64 {
-			match r {
-				i64 { return VrlValue(l >= f64(r)) }
-				f64 { return VrlValue(l >= r) }
-				else {}
-			}
-		}
-		string {
-			match r {
-				string { return VrlValue(l >= r) }
-				else {}
-			}
-		}
-		Timestamp {
-			match r {
-				Timestamp { return VrlValue(l.t.unix() >= r.t.unix()) }
-				else {}
-			}
-		}
-		else {}
-	}
-	return error("can't compare these types")
+	return compare_values(left, right, .ge)
 }
 
 fn index_into(container VrlValue, index VrlValue) !VrlValue {

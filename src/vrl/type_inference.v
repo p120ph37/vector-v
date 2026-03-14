@@ -7,53 +7,20 @@ module vrl
 // This is compile-time analysis, not runtime type inspection.
 
 // Helper constructors for common type ObjectMaps.
-fn never_type() ObjectMap {
+fn make_type(name string) ObjectMap {
 	mut m := new_object_map()
-	m.set('never', VrlValue(true))
+	m.set(name, VrlValue(true))
 	return m
 }
 
-fn null_type() ObjectMap {
-	mut m := new_object_map()
-	m.set('null', VrlValue(true))
-	return m
-}
-
-fn boolean_type() ObjectMap {
-	mut m := new_object_map()
-	m.set('boolean', VrlValue(true))
-	return m
-}
-
-fn bytes_type() ObjectMap {
-	mut m := new_object_map()
-	m.set('bytes', VrlValue(true))
-	return m
-}
-
-fn integer_type() ObjectMap {
-	mut m := new_object_map()
-	m.set('integer', VrlValue(true))
-	return m
-}
-
-fn float_type() ObjectMap {
-	mut m := new_object_map()
-	m.set('float', VrlValue(true))
-	return m
-}
-
-fn any_type() ObjectMap {
-	mut m := new_object_map()
-	m.set('any', VrlValue(true))
-	return m
-}
-
-fn undefined_type() ObjectMap {
-	mut m := new_object_map()
-	m.set('undefined', VrlValue(true))
-	return m
-}
+fn never_type() ObjectMap { return make_type('never') }
+fn null_type() ObjectMap { return make_type('null') }
+fn boolean_type() ObjectMap { return make_type('boolean') }
+fn bytes_type() ObjectMap { return make_type('bytes') }
+fn integer_type() ObjectMap { return make_type('integer') }
+fn float_type() ObjectMap { return make_type('float') }
+fn any_type() ObjectMap { return make_type('any') }
+fn undefined_type() ObjectMap { return make_type('undefined') }
 
 fn is_never(t ObjectMap) bool {
 	return t.len() == 1 && (t.get('never') or { return false }) == VrlValue(true)

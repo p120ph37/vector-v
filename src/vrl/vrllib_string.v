@@ -3,58 +3,22 @@ module vrl
 import math
 import pcre2
 
-// camelcase(value, [original_case])
-fn fn_camelcase(args []VrlValue) !VrlValue {
-	if args.len < 1 {
-		return error('camelcase requires 1 argument')
-	}
-	a := args[0]
-	s := match a {
-		string { a }
-		else { return error('camelcase requires a string') }
-	}
-	mut words := split_words(s)
-	if args.len >= 2 {
-		oc := args[1]
-		match oc {
-			string { words = split_words_by_case(s, oc) }
-			else {}
-		}
-	}
-	mut result := []u8{}
-	for i, w in words {
-		if i == 0 {
-			for c in w.to_lower() {
-				result << c
-			}
-		} else {
-			mut first := true
-			for c in w.to_lower() {
-				if first {
-					if c >= `a` && c <= `z` {
-						result << c - 32
-					} else {
-						result << c
-					}
-					first = false
-				} else {
-					result << c
-				}
-			}
-		}
-	}
-	return VrlValue(result.bytestr())
+enum CaseMode {
+	camel
+	pascal
+	snake
+	kebab
+	screaming_snake
 }
 
-// pascalcase(value, [original_case])
-fn fn_pascalcase(args []VrlValue) !VrlValue {
+fn extract_words(args []VrlValue, func_name string) !(string, []string) {
 	if args.len < 1 {
-		return error('pascalcase requires 1 argument')
+		return error('${func_name} requires 1 argument')
 	}
 	a := args[0]
 	s := match a {
 		string { a }
-		else { return error('pascalcase requires a string') }
+		else { return error('${func_name} requires a string') }
 	}
 	mut words := split_words(s)
 	if args.len >= 2 {
@@ -64,99 +28,64 @@ fn fn_pascalcase(args []VrlValue) !VrlValue {
 			else {}
 		}
 	}
+	return s, words
+}
+
+fn capitalize_word(w string) string {
 	mut result := []u8{}
-	for w in words {
-		mut first := true
-		for c in w.to_lower() {
-			if first {
-				if c >= `a` && c <= `z` {
-					result << c - 32
-				} else {
-					result << c
-				}
-				first = false
+	mut first := true
+	for c in w.to_lower() {
+		if first {
+			if c >= `a` && c <= `z` {
+				result << c - 32
 			} else {
 				result << c
 			}
+			first = false
+		} else {
+			result << c
 		}
 	}
-	return VrlValue(result.bytestr())
+	return result.bytestr()
 }
 
-// snakecase(value, [original_case])
-fn fn_snakecase(args []VrlValue) !VrlValue {
-	if args.len < 1 {
-		return error('snakecase requires 1 argument')
+fn convert_case(args []VrlValue, mode CaseMode) !VrlValue {
+	func_name := match mode {
+		.camel { 'camelcase' }
+		.pascal { 'pascalcase' }
+		.snake { 'snakecase' }
+		.kebab { 'kebabcase' }
+		.screaming_snake { 'screamingsnakecase' }
 	}
-	a := args[0]
-	s := match a {
-		string { a }
-		else { return error('snakecase requires a string') }
+	_, words := extract_words(args, func_name)!
+	mut parts := []string{}
+	sep := match mode {
+		.snake, .screaming_snake { '_' }
+		.kebab { '-' }
+		else { '' }
 	}
-	mut words := split_words(s)
-	if args.len >= 2 {
-		oc := args[1]
-		match oc {
-			string { words = split_words_by_case(s, oc) }
-			else {}
+	for i, w in words {
+		match mode {
+			.camel {
+				if i == 0 {
+					parts << w.to_lower()
+				} else {
+					parts << capitalize_word(w)
+				}
+			}
+			.pascal { parts << capitalize_word(w) }
+			.snake, .kebab { parts << w.to_lower() }
+			.screaming_snake { parts << w.to_upper() }
 		}
 	}
-	mut parts := []string{}
-	for w in words {
-		parts << w.to_lower()
-	}
-	return VrlValue(parts.join('_'))
+	return VrlValue(parts.join(sep))
 }
 
-// kebabcase(value, [original_case])
-fn fn_kebabcase(args []VrlValue) !VrlValue {
-	if args.len < 1 {
-		return error('kebabcase requires 1 argument')
-	}
-	a := args[0]
-	s := match a {
-		string { a }
-		else { return error('kebabcase requires a string') }
-	}
-	mut words := split_words(s)
-	if args.len >= 2 {
-		oc := args[1]
-		match oc {
-			string { words = split_words_by_case(s, oc) }
-			else {}
-		}
-	}
-	mut parts := []string{}
-	for w in words {
-		parts << w.to_lower()
-	}
-	return VrlValue(parts.join('-'))
-}
-
-// screamingsnakecase(value, [original_case])
-fn fn_screamingsnakecase(args []VrlValue) !VrlValue {
-	if args.len < 1 {
-		return error('screamingsnakecase requires 1 argument')
-	}
-	a := args[0]
-	s := match a {
-		string { a }
-		else { return error('screamingsnakecase requires a string') }
-	}
-	mut words := split_words(s)
-	if args.len >= 2 {
-		oc := args[1]
-		match oc {
-			string { words = split_words_by_case(s, oc) }
-			else {}
-		}
-	}
-	mut parts := []string{}
-	for w in words {
-		parts << w.to_upper()
-	}
-	return VrlValue(parts.join('_'))
-}
+fn fn_camelcase(args []VrlValue) !VrlValue { return convert_case(args, .camel) }
+fn fn_pascalcase(args []VrlValue) !VrlValue { return convert_case(args, .pascal) }
+fn fn_snakecase(args []VrlValue) !VrlValue { return convert_case(args, .snake) }
+fn fn_kebabcase(args []VrlValue) !VrlValue { return convert_case(args, .kebab) }
+fn fn_screamingsnakecase(args []VrlValue) !VrlValue { return convert_case(args, .screaming_snake) }
 
 // split_words_by_case splits a string into words based on the specified original case.
 // This matches the Rust convert_case crate's from_case() behavior:
