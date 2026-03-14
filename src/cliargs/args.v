@@ -12,9 +12,13 @@ pub:
 	help        bool   // -h or --help
 }
 
-// parse_args parses command-line arguments.
+// parse_args parses command-line arguments from os.args.
 pub fn parse_args() Args {
-	args := os.args[1..] // skip program name
+	return parse_args_from(os.args[1..])
+}
+
+// parse_args_from parses a list of argument strings into Args.
+pub fn parse_args_from(args []string) Args {
 	mut config_path := ''
 	mut verbose := false
 	mut validate := false
