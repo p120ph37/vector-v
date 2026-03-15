@@ -187,4 +187,33 @@ assert reqs[0].body == '{"data":"payload"}'
 
 Features: route matching by method+path, response cycling via `sequence()` for retry/refresh testing, full request capture (method, path, headers, body), `respond_with_headers()` for custom response headers, multiple concurrent servers on different ports.
 
-Used by: EC2 metadata integration tests (`src/transforms/ec2_mock_test.v`), VRL `http_request` tests (`src/vrl/vrllib_http_mock_test.v`).
+#### TCP/UDP Socket Mock Servers
+
+For testing socket-based components (SocketSink, VectorSink, SocketSource, VectorSource, WebSocketSink), the mockserver also provides `MockTcpServer` and `MockUdpServer`:
+
+```v
+import mockserver
+
+// TCP mock server
+mut tcp := mockserver.start_tcp()!  // or start_tcp_with_config(...)
+defer { tcp.stop() }
+// Connect sinks to tcp.address(), then:
+msgs := tcp.wait_for_messages(2, 5000)
+assert msgs[0].data.contains('expected')
+
+// UDP mock server
+mut udp := mockserver.start_udp()!
+defer { udp.stop() }
+// Send datagrams to udp.address(), then:
+pkts := udp.wait_for_datagrams(1, 3000)
+assert pkts[0].data == 'hello'
+
+// TCP with WebSocket upgrade support
+mut ws := mockserver.start_tcp_with_config(mockserver.TcpServerConfig{
+    ws_upgrade: true  // responds with 101 upgrade, decodes WS frames
+})!
+```
+
+`TcpServerConfig` options: `response` (echo back data), `close_after_read` (close after first read), `reject` (close immediately, simulates connection refused), `ws_upgrade` (WebSocket upgrade handshake + frame decoding), `accept_count` (limit accepted connections).
+
+Used by: EC2 metadata integration tests (`src/transforms/ec2_mock_test.v`), VRL `http_request` tests (`src/vrl/vrllib_http_mock_test.v`), Loki/OTLP/HTTP sink integration tests, HttpClient source integration tests, Socket/Vector/WebSocket sink mock tests, HTTP error simulation tests.
