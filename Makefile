@@ -22,6 +22,7 @@ test-all:
 	v -enable-globals test src/api/
 	v -enable-globals test src/cliargs/
 	v -enable-globals test src/mockserver/
+	v -enable-globals test src/aws/
 	v -enable-globals test src/vrl/
 
 coverage:

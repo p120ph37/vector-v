@@ -8,7 +8,8 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
   - `vrl/` — VRL (Vector Remap Language) interpreter and runtime
   - `sources/` — Data ingestion components (stdin, demo_logs, fluent)
   - `transforms/` — Data processing (remap, filter, reduce, aws_ec2_metadata, dedupe, sample, throttle, exclusive_route, passthrough)
-  - `sinks/` — Data output destinations (console, blackhole, loki, opentelemetry)
+  - `sinks/` — Data output destinations (console, blackhole, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics)
+  - `aws/` — Shared AWS utilities (credentials resolution, SigV4 signing)
   - `event/` — Event types (log, metric, trace)
   - `topology/` — Component graph management with input-based routing
   - `conf/` — TOML configuration parsing
@@ -77,11 +78,13 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **exclusive_route** — Route events to first matching output
 - **passthrough** — Identity transform (pass events unchanged)
 
-### Sinks (4 / 43 upstream)
+### Sinks (6 / 43 upstream)
 - **console** — Write to stdout/stderr (json, text, logfmt)
 - **blackhole** — Discard events (benchmarking)
 - **loki** — Grafana Loki push API (JSON, label-based batching)
 - **opentelemetry** — OTLP HTTP logs export
+- **aws_cloudwatch_logs** — AWS CloudWatch Logs via PutLogEvents API (SigV4-signed)
+- **aws_cloudwatch_metrics** — AWS CloudWatch Metrics via Embedded Metric Format (EMF over CloudWatch Logs)
 
 ### API
 - `GET /health` — Liveness check
@@ -118,6 +121,17 @@ VRL programs are interpreted rather than compiled to native code. The runtime wa
 ### Fluent Source: Simplified msgpack decoder
 
 We implement a minimal msgpack decoder directly in V rather than depending on an external library. Only the subset of msgpack needed for the Fluent Forward Protocol is supported (fixstr, str8-32, fixint, uint8-64, fixmap, fixarray, bin, ext type 0 for EventTime).
+
+### AWS Shared Module: Credentials and SigV4 signing
+
+`src/aws/` provides shared AWS infrastructure used by CloudWatch sinks and future AWS sinks (S3, Kinesis, etc.):
+
+- **Credential resolution** (`credentials.v`): Standard AWS credential chain — explicit config > environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`) > shared credentials file (`~/.aws/credentials`) > EC2 IMDS. Region resolution follows: config > `AWS_REGION` > `AWS_DEFAULT_REGION` > IMDS.
+- **SigV4 signing** (`sigv4.v`): AWS Signature Version 4 implementation using V's `crypto.hmac` and `crypto.sha256`. No external SDK dependency.
+
+### CloudWatch Metrics: EMF via CloudWatch Logs
+
+Rather than calling the CloudWatch PutMetricData API directly, metrics are sent as Embedded Metric Format (EMF) JSON through the CloudWatch Logs PutLogEvents API. CloudWatch automatically extracts metric data from EMF-formatted log entries. This unifies the transport layer (both logs and metrics use the same CloudWatch Logs API) and avoids implementing a second API surface.
 
 ### EC2 Metadata: Synchronous refresh (diverges from upstream)
 

@@ -3,7 +3,7 @@ module sinks
 import event
 
 // Sink is a tagged union of all sink types.
-pub type Sink = ConsoleSink | BlackholeSink | LokiSink | OpenTelemetrySink
+pub type Sink = ConsoleSink | BlackholeSink | LokiSink | OpenTelemetrySink | CloudWatchLogsSink | CloudWatchMetricsSink
 
 // build_sink creates a Sink from a type name and config options.
 pub fn build_sink(typ string, opts map[string]string) !Sink {
@@ -19,6 +19,12 @@ pub fn build_sink(typ string, opts map[string]string) !Sink {
 		}
 		'opentelemetry' {
 			return Sink(new_opentelemetry(opts))
+		}
+		'aws_cloudwatch_logs' {
+			return Sink(new_cloudwatch_logs(opts)!)
+		}
+		'aws_cloudwatch_metrics' {
+			return Sink(new_cloudwatch_metrics(opts)!)
 		}
 		else {
 			return error('unknown sink type: "${typ}"')
@@ -43,6 +49,14 @@ pub fn send_to_sink(s Sink, e event.Event) ! {
 		OpenTelemetrySink {
 			mut os := s
 			os.send(e)!
+		}
+		CloudWatchLogsSink {
+			mut cs := s
+			cs.send(e)!
+		}
+		CloudWatchMetricsSink {
+			mut ms := s
+			ms.send(e)!
 		}
 	}
 }
