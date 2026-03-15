@@ -3,7 +3,6 @@ module sinks
 import aws
 import event
 import json
-import net.http
 import time
 
 // CloudWatchLogsSink sends log events to AWS CloudWatch Logs.
@@ -215,40 +214,7 @@ fn (s &CloudWatchLogsSink) ensure_log_stream() ! {
 }
 
 fn (s &CloudWatchLogsSink) call_api(target string, payload string) ! {
-	host := s.endpoint.replace('https://', '').replace('http://', '')
-
-	signed := aws.sign_request(aws.SignConfig{
-		creds: s.creds
-		method: 'POST'
-		host: host
-		path: '/'
-		content_type: 'application/x-amz-json-1.1'
-		payload: payload
-		region: s.region
-		service: 'logs'
-		extra_headers: {
-			'X-Amz-Target': target
-		}
-	})!
-
-	mut header := http.Header{}
-	for k, v in signed.headers {
-		header.add_custom(k, v)!
-	}
-
-	resp := http.fetch(http.FetchConfig{
-		url: s.endpoint + '/'
-		method: .post
-		data: payload
-		header: header
-		verbose: false
-	}) or {
-		return error('HTTP request failed: ${err}')
-	}
-
-	if resp.status_code >= 400 {
-		return error('CloudWatch API ${target}: HTTP ${resp.status_code}: ${resp.body}')
-	}
+	aws_send_payload(s.endpoint, s.creds, s.region, 'logs', target, payload)!
 }
 
 // total_buffered returns the number of events currently buffered.

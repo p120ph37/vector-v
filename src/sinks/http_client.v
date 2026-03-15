@@ -1,5 +1,6 @@
 module sinks
 
+import aws
 import net.http
 
 // HttpBatch collects events and sends them in batches over HTTP.
@@ -109,6 +110,50 @@ pub fn (b &HttpBatch) simple_healthcheck() !bool {
 		return error('healthcheck failed: ${err}')
 	}
 	return true
+}
+
+// aws_send_payload sends a SigV4-signed HTTP POST to an AWS service endpoint.
+// This is the shared HTTP transport for all AWS sinks (CloudWatch Logs,
+// CloudWatch Metrics, S3). It mirrors upstream Vector's approach where
+// protocol-specific sinks delegate HTTP transport to a shared layer.
+pub fn aws_send_payload(endpoint string, creds aws.AwsCredentials, region string, service string, target string, payload string) ! {
+	host := endpoint.replace('https://', '').replace('http://', '')
+
+	mut extra_headers := map[string]string{}
+	if target.len > 0 {
+		extra_headers['X-Amz-Target'] = target
+	}
+
+	signed := aws.sign_request(aws.SignConfig{
+		creds: creds
+		method: 'POST'
+		host: host
+		path: '/'
+		content_type: 'application/x-amz-json-1.1'
+		payload: payload
+		region: region
+		service: service
+		extra_headers: extra_headers
+	})!
+
+	mut header := http.Header{}
+	for k, v in signed.headers {
+		header.add_custom(k, v)!
+	}
+
+	resp := http.fetch(http.FetchConfig{
+		url: endpoint + '/'
+		method: .post
+		data: payload
+		header: header
+		verbose: false
+	}) or {
+		return error('HTTP request failed: ${err}')
+	}
+
+	if resp.status_code >= 400 {
+		return error('AWS ${service} ${target}: HTTP ${resp.status_code}: ${resp.body}')
+	}
 }
 
 // base64_encode encodes a string to base64.

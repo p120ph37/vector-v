@@ -78,9 +78,13 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **exclusive_route** — Route events to first matching output
 - **passthrough** — Identity transform (pass events unchanged)
 
-### Sinks (6 / 43 upstream)
+### Sinks (10 / 43 upstream)
 - **console** — Write to stdout/stderr (json, text, logfmt)
 - **blackhole** — Discard events (benchmarking)
+- **http** — Generic HTTP sink (json, text, ndjson); shared base layer for protocol-specific HTTP sinks
+- **file** — Write events to files with strftime-based path partitioning
+- **aws_s3** — AWS S3 object upload via PutObject API (SigV4-signed, batched)
+- **websocket** — WebSocket client sink (RFC 6455 text frames, auto-reconnect)
 - **loki** — Grafana Loki push API (JSON, label-based batching)
 - **opentelemetry** — OTLP HTTP logs export
 - **aws_cloudwatch_logs** — AWS CloudWatch Logs via PutLogEvents API (SigV4-signed)
@@ -138,6 +142,12 @@ Rather than calling the CloudWatch PutMetricData API directly, metrics are sent 
 Upstream uses `ArcSwap` for lock-free atomic metadata updates via a background task. Our implementation refreshes metadata lazily during `transform()` when the cache expires, avoiding the complexity of V's shared memory primitives. This is simpler but means the first event after a refresh interval may see slightly higher latency.
 
 All IMDS HTTP requests use a 1-second timeout (the metadata service is on the local link). On fetch failure, the transform keeps its cached values (possibly empty) and defers the next retry until the refresh interval expires again, avoiding frequent retries while still allowing recovery from transient failures.
+
+### Shared HTTP Sink Transport Layer
+
+Like upstream Vector, HTTP-based sinks share a common transport layer (`src/sinks/http_client.v`). `HttpBatch` provides batched HTTP sending with configurable auth (Basic/Bearer), headers, and timeouts. Protocol-specific sinks (Loki, OTLP, generic HTTP) compose `HttpBatch` and add their own encoding/payload logic.
+
+For AWS sinks, `aws_send_payload()` in `http_client.v` provides SigV4-signed HTTP transport shared by CloudWatch Logs, CloudWatch Metrics, and S3 sinks, eliminating duplicated HTTP + signing code. The generic `HttpSink` (`src/sinks/http.v`) wraps `HttpBatch` with multi-codec encoding (json/ndjson/text) and serves as the direct equivalent of upstream's generic HTTP sink.
 
 ### Mock Server Testing Framework
 
