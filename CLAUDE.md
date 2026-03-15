@@ -62,10 +62,16 @@ make coverage-clean                              # Remove .coverage/ artifacts
 
 ## Implemented Components
 
-### Sources (3 / 27 upstream)
+### Sources (9 / 27 upstream)
 - **stdin** — Reads lines from stdin
 - **demo_logs** — Generates sample log events
 - **fluent** — Fluent Forward Protocol v1 over TCP (msgpack)
+- **exec** — Run external commands and capture output (scheduled or streaming)
+- **file_descriptors** — Read from file descriptors (generalized stdin)
+- **http_client** — Poll HTTP endpoints at configurable intervals
+- **socket** — Listen on TCP/UDP sockets with shared line-buffered framing
+- **websocket** — Connect to WebSocket servers and receive messages
+- **vector** — Receive events from other Vector instances (JSON-over-TCP)
 
 ### Transforms (9 / 15 upstream)
 - **remap** — VRL program execution
@@ -78,13 +84,15 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **exclusive_route** — Route events to first matching output
 - **passthrough** — Identity transform (pass events unchanged)
 
-### Sinks (10 / 43 upstream)
+### Sinks (12 / 43 upstream)
 - **console** — Write to stdout/stderr (json, text, logfmt)
 - **blackhole** — Discard events (benchmarking)
 - **http** — Generic HTTP sink (json, text, ndjson); shared base layer for protocol-specific HTTP sinks
 - **file** — Write events to files with strftime-based path partitioning
 - **aws_s3** — AWS S3 object upload via PutObject API (SigV4-signed, batched)
 - **websocket** — WebSocket client sink (RFC 6455 text frames, auto-reconnect)
+- **socket** — Send events over TCP/UDP sockets (shared connection management with vector sink)
+- **vector** — Send events to other Vector instances (JSON-over-TCP, batched)
 - **loki** — Grafana Loki push API (JSON, label-based batching)
 - **opentelemetry** — OTLP HTTP logs export
 - **aws_cloudwatch_logs** — AWS CloudWatch Logs via PutLogEvents API (SigV4-signed)
@@ -142,6 +150,12 @@ Rather than calling the CloudWatch PutMetricData API directly, metrics are sent 
 Upstream uses `ArcSwap` for lock-free atomic metadata updates via a background task. Our implementation refreshes metadata lazily during `transform()` when the cache expires, avoiding the complexity of V's shared memory primitives. This is simpler but means the first event after a refresh interval may see slightly higher latency.
 
 All IMDS HTTP requests use a 1-second timeout (the metadata service is on the local link). On fetch failure, the transform keeps its cached values (possibly empty) and defers the next retry until the refresh interval expires again, avoiding frequent retries while still allowing recovery from transient failures.
+
+### Shared Socket Buffering Layer
+
+Like upstream Vector, socket-based sources share a common framing/buffering layer (`src/sources/socket_buf.v`). `SocketBuffer` provides line-delimited framing over TCP with configurable max line length, `\r\n` handling, and force-flush for oversized data. This is reused by SocketSource, VectorSource, and any future TCP-based sources.
+
+Similarly, socket-based sinks (SocketSink and VectorSink) share the same TCP connection management and reconnect-on-failure pattern, paralleling how upstream Vector's socket components share transport infrastructure.
 
 ### Shared HTTP Sink Transport Layer
 

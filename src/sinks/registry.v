@@ -13,6 +13,8 @@ pub type Sink = ConsoleSink
 	| FileSink
 	| S3Sink
 	| WebSocketSink
+	| VectorSink
+	| SocketSink
 
 // build_sink creates a Sink from a type name and config options.
 pub fn build_sink(typ string, opts map[string]string) !Sink {
@@ -46,6 +48,12 @@ pub fn build_sink(typ string, opts map[string]string) !Sink {
 		}
 		'websocket' {
 			return Sink(new_websocket(opts)!)
+		}
+		'vector' {
+			return Sink(new_vector(opts))
+		}
+		'socket' {
+			return Sink(new_socket_sink(opts)!)
 		}
 		else {
 			return error('unknown sink type: "${typ}"')
@@ -94,6 +102,14 @@ pub fn send_to_sink(s Sink, e event.Event) ! {
 		WebSocketSink {
 			mut ws := s
 			ws.send(e)!
+		}
+		VectorSink {
+			mut vs := s
+			vs.send(e)!
+		}
+		SocketSink {
+			mut sks := s
+			sks.send(e)!
 		}
 	}
 }
