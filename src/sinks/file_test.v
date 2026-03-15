@@ -196,3 +196,90 @@ fn test_file_metric_events() {
 	content := os.read_file('${test_dir}/metrics.log') or { '' }
 	assert content.contains('cpu.usage')
 }
+
+fn test_file_trace_events() {
+	test_dir := '/tmp/vector-v-test-file-trace-${time.now().unix()}'
+	defer { os.rmdir_all(test_dir) or {} }
+
+	mut s := new_file({
+		'path': '${test_dir}/traces.log'
+	})!
+
+	trace := event.Event(event.TraceEvent{})
+	s.send(trace)!
+
+	content := os.read_file('${test_dir}/traces.log') or { '' }
+	assert content.len > 0
+}
+
+fn test_file_encode_text() {
+	s := new_file({
+		'path':           '/tmp/test.log'
+		'encoding.codec': 'text'
+	})!
+	ev := event.Event(event.new_log('text output'))
+	result := s.encode_event(ev)
+	assert result == 'text output'
+}
+
+fn test_file_encode_json() {
+	s := new_file({
+		'path':           '/tmp/test.log'
+		'encoding.codec': 'json'
+	})!
+	ev := event.Event(event.new_log('json output'))
+	result := s.encode_event(ev)
+	assert result.contains('"message"')
+	assert result.contains('json output')
+}
+
+fn test_file_encode_metric() {
+	s := new_file({
+		'path': '/tmp/test.log'
+	})!
+	metric := event.Event(event.Metric{
+		name: 'test.gauge'
+		kind: .absolute
+		value: event.MetricValue(event.CounterValue{ value: 5.0 })
+	})
+	result := s.encode_event(metric)
+	assert result.contains('test.gauge')
+}
+
+fn test_file_encode_trace() {
+	s := new_file({
+		'path': '/tmp/test.log'
+	})!
+	trace := event.Event(event.TraceEvent{})
+	result := s.encode_event(trace)
+	assert result.len > 0
+}
+
+fn test_file_encode_ndjson() {
+	s := new_file({
+		'path': '/tmp/test.log'
+	})!
+	ev := event.Event(event.new_log('ndjson output'))
+	result := s.encode_event(ev)
+	assert result.contains('"message"')
+	assert result.contains('ndjson output')
+}
+
+fn test_file_same_path_written_twice() {
+	test_dir := '/tmp/vector-v-test-file-twice-${time.now().unix()}'
+	defer { os.rmdir_all(test_dir) or {} }
+
+	mut s := new_file({
+		'path':           '${test_dir}/output.log'
+		'encoding.codec': 'text'
+	})!
+
+	ev1 := event.Event(event.new_log('first'))
+	s.send(ev1)!
+	assert s.total_open() == 1
+
+	// Second write to same path should reuse known_paths
+	ev2 := event.Event(event.new_log('second'))
+	s.send(ev2)!
+	assert s.total_open() == 1
+}

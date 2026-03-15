@@ -205,3 +205,84 @@ fn test_parse_http_method_cases() {
 	assert parse_http_method('POST') == .post
 	assert parse_http_method('unknown') == .post
 }
+
+fn test_http_flush_empty() {
+	mut s := new_http({
+		'endpoint': 'http://localhost:8080'
+	})
+	// Flush with empty buffer should be a no-op
+	s.flush() or {
+		assert false, 'flush of empty buffer should not error'
+	}
+	assert s.total_buffered() == 0
+}
+
+fn test_http_trace_events() {
+	mut s := new_http({
+		'endpoint':         'http://localhost:8080'
+		'batch.max_events': '1000'
+	})
+
+	trace := event.Event(event.TraceEvent{})
+	s.send(trace) or {}
+	assert s.total_buffered() == 1
+}
+
+fn test_http_encode_text_event() {
+	s := new_http({
+		'endpoint':       'http://localhost:8080'
+		'encoding.codec': 'text'
+	})
+	ev := event.Event(event.new_log('plain text message'))
+	result := s.encode_event(ev)
+	assert result == 'plain text message'
+}
+
+fn test_http_encode_json_event() {
+	s := new_http({
+		'endpoint':       'http://localhost:8080'
+		'encoding.codec': 'json'
+	})
+	ev := event.Event(event.new_log('json msg'))
+	result := s.encode_event(ev)
+	assert result.contains('"message"')
+	assert result.contains('json msg')
+}
+
+fn test_http_encode_metric_event() {
+	s := new_http({
+		'endpoint': 'http://localhost:8080'
+	})
+	metric := event.Event(event.Metric{
+		name: 'test.gauge'
+		kind: .absolute
+		value: event.MetricValue(event.CounterValue{ value: 10.0 })
+	})
+	result := s.encode_event(metric)
+	assert result.contains('test.gauge')
+}
+
+fn test_http_encode_trace_event() {
+	s := new_http({
+		'endpoint': 'http://localhost:8080'
+	})
+	trace := event.Event(event.TraceEvent{})
+	result := s.encode_event(trace)
+	assert result.len > 0
+}
+
+fn test_http_invalid_batch_timeout() {
+	s := new_http({
+		'endpoint':            'http://localhost:8080'
+		'batch.timeout_secs': '-1'
+	})
+	assert s.batch_timeout > 0
+}
+
+fn test_http_invalid_batch_max() {
+	s := new_http({
+		'endpoint':         'http://localhost:8080'
+		'batch.max_events': '-5'
+	})
+	assert s.batch_max == 100
+}

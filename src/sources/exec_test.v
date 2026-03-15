@@ -115,3 +115,66 @@ fn test_exec_multiline_output() {
 	}
 	assert count == 3
 }
+
+fn test_new_exec_invalid_interval() {
+	s := new_exec({
+		'command':                       'date'
+		'scheduled.exec_interval_secs': '-5'
+	})!
+	assert s.exec_interval > 0
+}
+
+fn test_new_exec_invalid_respawn_interval() {
+	s := new_exec({
+		'command':                           'date'
+		'mode':                             'streaming'
+		'streaming.respawn_interval_secs': '-5'
+	})!
+	assert s.respawn_interval > 0
+}
+
+fn test_new_exec_working_directory() {
+	s := new_exec({
+		'command':           'ls'
+		'working_directory': '/tmp'
+	})!
+	assert s.working_dir == '/tmp'
+}
+
+fn test_new_exec_invalid_max_length() {
+	s := new_exec({
+		'command':    'echo hello'
+		'max_length': '-1'
+	})!
+	assert s.max_length == 102400
+}
+
+fn test_exec_event_metadata() {
+	s := new_exec({
+		'command': 'echo metadata_test'
+		'mode':    'streaming'
+		'streaming.respawn_on_exit': 'false'
+	})!
+	output := chan event.Event{cap: 100}
+	s.exec_once(output)
+
+	mut ev := event.Event(event.new_log(''))
+	assert output.try_pop(mut ev) == .success
+	log_ev := ev as event.LogEvent
+	assert log_ev.meta.source_type == 'exec'
+	cmd_val := log_ev.get('command') or { panic('expected command field') }
+	assert event.value_to_string(cmd_val) == 'echo metadata_test'
+}
+
+fn test_exec_run_streaming_no_respawn() {
+	s := new_exec({
+		'command':                   'echo done'
+		'mode':                     'streaming'
+		'streaming.respawn_on_exit': 'false'
+	})!
+	output := chan event.Event{cap: 100}
+	s.run_streaming(output)
+	// Should return after single execution since respawn_on_exit is false
+	mut ev := event.Event(event.new_log(''))
+	assert output.try_pop(mut ev) == .success
+}

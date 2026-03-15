@@ -21,7 +21,7 @@ pub struct SocketSink {
 	address string
 	codec   SocketCodec
 mut:
-	tcp_conn  ?net.TcpConn
+	tcp_fd    int = -1
 	connected bool
 }
 
@@ -71,7 +71,7 @@ pub fn (mut s SocketSink) send(e event.Event) ! {
 	}
 }
 
-fn (s &SocketSink) encode_event(e event.Event) string {
+pub fn (s &SocketSink) encode_event(e event.Event) string {
 	match e {
 		event.LogEvent {
 			return match s.codec {
@@ -107,24 +107,27 @@ fn (mut s SocketSink) send_tcp(line string) ! {
 }
 
 fn (mut s SocketSink) connect_tcp() ! {
-	if mut c := s.tcp_conn {
-		c.close() or {}
+	if s.tcp_fd >= 0 {
+		C.close(s.tcp_fd)
+		s.tcp_fd = -1
 	}
 
 	mut conn := net.dial_tcp(s.address) or {
 		return error('tcp connect to ${s.address} failed: ${err}')
 	}
 	conn.set_write_timeout(5 * time.second)
-	s.tcp_conn = conn
+	s.tcp_fd = conn.sock.handle
 	s.connected = true
 }
 
-fn (mut s SocketSink) write_tcp(data string) ! {
-	mut c := s.tcp_conn or {
+pub fn (mut s SocketSink) write_tcp(data string) ! {
+	if s.tcp_fd < 0 {
 		return error('not connected')
 	}
-	c.write(data.bytes()) or {
-		return error('write failed: ${err}')
+	bytes := data.bytes()
+	sent := C.send(s.tcp_fd, bytes.data, bytes.len, 0)
+	if sent < 0 {
+		return error('write failed: socket error')
 	}
 }
 
@@ -141,8 +144,9 @@ fn (s &SocketSink) send_udp(line string) ! {
 
 // close closes the TCP connection (no-op for UDP).
 pub fn (mut s SocketSink) close() {
-	if mut c := s.tcp_conn {
-		c.close() or {}
+	if s.tcp_fd >= 0 {
+		C.close(s.tcp_fd)
+		s.tcp_fd = -1
 	}
 	s.connected = false
 }

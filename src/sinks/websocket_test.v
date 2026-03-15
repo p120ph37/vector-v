@@ -1,5 +1,7 @@
 module sinks
 
+import event
+
 fn test_new_websocket_defaults() {
 	s := new_websocket({
 		'uri': 'ws://localhost:9000/events'
@@ -137,4 +139,86 @@ fn test_websocket_invalid_uri() {
 		return
 	}
 	// Some URIs may parse unexpectedly — just verify it doesn't crash
+}
+
+fn test_websocket_encode_event_json() {
+	s := new_websocket({
+		'uri': 'ws://localhost:9000/ws'
+	})!
+	ev := event.Event(event.new_log('test message'))
+	result := s.encode_event(ev)
+	assert result.contains('"message"')
+	assert result.contains('test message')
+}
+
+fn test_websocket_encode_event_text() {
+	s := new_websocket({
+		'uri':            'ws://localhost:9000/ws'
+		'encoding.codec': 'text'
+	})!
+	ev := event.Event(event.new_log('plain text'))
+	result := s.encode_event(ev)
+	assert result == 'plain text'
+}
+
+fn test_websocket_encode_metric() {
+	s := new_websocket({
+		'uri': 'ws://localhost:9000/ws'
+	})!
+	metric := event.Event(event.Metric{
+		name: 'req.count'
+		kind: .absolute
+		value: event.MetricValue(event.CounterValue{ value: 99.0 })
+	})
+	result := s.encode_event(metric)
+	assert result.len > 0
+	assert result.contains('req.count')
+}
+
+fn test_websocket_encode_trace() {
+	s := new_websocket({
+		'uri': 'ws://localhost:9000/ws'
+	})!
+	trace := event.Event(event.TraceEvent{})
+	result := s.encode_event(trace)
+	assert result.len > 0
+}
+
+fn test_websocket_close() {
+	mut s := new_websocket({
+		'uri': 'ws://localhost:9000/ws'
+	})!
+	assert s.connected == false
+	s.close()
+	assert s.connected == false
+}
+
+fn test_websocket_send_not_connected() {
+	mut s := new_websocket({
+		'uri': 'ws://localhost:19999/ws'
+	})!
+	ev := event.Event(event.new_log('test'))
+	s.send(ev) or {
+		assert err.msg().contains('connection failed')
+		return
+	}
+}
+
+fn test_websocket_send_text_frame_not_connected() {
+	mut s := new_websocket({
+		'uri': 'ws://localhost:9000/ws'
+	})!
+	s.send_text_frame('test') or {
+		assert err.msg().contains('not connected')
+		return
+	}
+	assert false, 'expected error for send when not connected'
+}
+
+fn test_websocket_invalid_ping() {
+	s := new_websocket({
+		'uri':                 'ws://localhost:9000/ws'
+		'ping_interval_secs': '-10'
+	})!
+	assert s.ping_interval > 0
 }

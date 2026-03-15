@@ -24,7 +24,7 @@ pub struct WebSocketSink {
 	codec          WsCodec
 	ping_interval  time.Duration = 30 * time.second
 mut:
-	conn      ?net.TcpConn
+	tcp_fd    int = -1
 	connected bool
 }
 
@@ -94,7 +94,7 @@ pub fn (mut s WebSocketSink) send(e event.Event) ! {
 	}
 }
 
-fn (s &WebSocketSink) encode_event(e event.Event) string {
+pub fn (s &WebSocketSink) encode_event(e event.Event) string {
 	match e {
 		event.LogEvent {
 			return match s.codec {
@@ -113,8 +113,9 @@ fn (s &WebSocketSink) encode_event(e event.Event) string {
 
 fn (mut s WebSocketSink) connect() ! {
 	// Close existing connection
-	if mut c := s.conn {
-		c.close() or {}
+	if s.tcp_fd >= 0 {
+		C.close(s.tcp_fd)
+		s.tcp_fd = -1
 	}
 
 	mut conn := net.dial_tcp('${s.host}:${s.port}') or {
@@ -123,7 +124,7 @@ fn (mut s WebSocketSink) connect() ! {
 	conn.set_write_timeout(5 * time.second)
 	conn.set_read_timeout(5 * time.second)
 
-	// Perform WebSocket upgrade handshake
+	// Perform WebSocket upgrade handshake (must happen before storing fd)
 	upgrade_req := 'GET ${s.path} HTTP/1.1\r\nHost: ${s.host}:${s.port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n'
 	conn.write(upgrade_req.bytes()) or {
 		conn.close() or {}
@@ -142,18 +143,20 @@ fn (mut s WebSocketSink) connect() ! {
 		return error('websocket upgrade rejected: ${response.split_into_lines()[0]}')
 	}
 
-	s.conn = conn
+	// Store raw fd for subsequent writes
+	s.tcp_fd = conn.sock.handle
 	s.connected = true
 }
 
-fn (mut s WebSocketSink) send_text_frame(payload string) ! {
-	mut c := s.conn or {
+pub fn (mut s WebSocketSink) send_text_frame(payload string) ! {
+	if s.tcp_fd < 0 {
 		return error('not connected')
 	}
 
 	frame := build_ws_frame(payload)
-	c.write(frame) or {
-		return error('write failed: ${err}')
+	sent := C.send(s.tcp_fd, frame.data, frame.len, 0)
+	if sent < 0 {
+		return error('write failed: socket error')
 	}
 }
 
@@ -198,8 +201,9 @@ pub fn build_ws_frame(payload string) []u8 {
 
 // close closes the WebSocket connection.
 pub fn (mut s WebSocketSink) close() {
-	if mut c := s.conn {
-		c.close() or {}
+	if s.tcp_fd >= 0 {
+		C.close(s.tcp_fd)
+		s.tcp_fd = -1
 	}
 	s.connected = false
 }

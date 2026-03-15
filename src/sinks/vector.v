@@ -21,7 +21,7 @@ pub struct VectorSink {
 	batch_max     int = 100
 	batch_timeout time.Duration = 1 * time.second
 mut:
-	conn       ?net.TcpConn
+	tcp_fd     int = -1
 	connected  bool
 	buffer     []string
 	last_flush time.Time
@@ -106,31 +106,35 @@ pub fn (s &VectorSink) total_buffered() int {
 }
 
 fn (mut s VectorSink) connect() ! {
-	if mut c := s.conn {
-		c.close() or {}
+	if s.tcp_fd >= 0 {
+		C.close(s.tcp_fd)
+		s.tcp_fd = -1
 	}
 
 	mut conn := net.dial_tcp(s.address) or {
 		return error('tcp connect to ${s.address} failed: ${err}')
 	}
 	conn.set_write_timeout(5 * time.second)
-	s.conn = conn
+	s.tcp_fd = conn.sock.handle
 	s.connected = true
 }
 
-fn (mut s VectorSink) write_data(data string) ! {
-	mut c := s.conn or {
+pub fn (mut s VectorSink) write_data(data string) ! {
+	if s.tcp_fd < 0 {
 		return error('not connected')
 	}
-	c.write(data.bytes()) or {
-		return error('write failed: ${err}')
+	bytes := data.bytes()
+	sent := C.send(s.tcp_fd, bytes.data, bytes.len, 0)
+	if sent < 0 {
+		return error('write failed: socket error')
 	}
 }
 
 // close closes the TCP connection.
 pub fn (mut s VectorSink) close() {
-	if mut c := s.conn {
-		c.close() or {}
+	if s.tcp_fd >= 0 {
+		C.close(s.tcp_fd)
+		s.tcp_fd = -1
 	}
 	s.connected = false
 }

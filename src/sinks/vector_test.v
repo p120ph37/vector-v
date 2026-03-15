@@ -60,3 +60,52 @@ fn test_vector_invalid_timeout() {
 	})
 	assert s.batch_timeout > 0 // falls back to default
 }
+
+fn test_vector_flush_empty() {
+	mut s := new_vector(map[string]string{})
+	// Flush with empty buffer should be a no-op
+	s.flush() or {
+		assert false, 'flush of empty buffer should not error'
+	}
+	assert s.total_buffered() == 0
+}
+
+fn test_vector_close() {
+	mut s := new_vector(map[string]string{})
+	assert s.connected == false
+	s.close()
+	assert s.connected == false
+}
+
+fn test_vector_send_no_connection() {
+	mut s := new_vector({
+		'address':          '127.0.0.1:19999'
+		'batch.max_events': '1'
+	})
+	ev := event.Event(event.new_log('test'))
+	s.send(ev) or {
+		assert err.msg().contains('connection failed')
+		return
+	}
+	// Connection to non-listening port should fail on flush
+}
+
+fn test_vector_write_data_not_connected() {
+	mut s := new_vector(map[string]string{})
+	s.write_data('test') or {
+		assert err.msg().contains('not connected')
+		return
+	}
+	assert false, 'expected error for write when not connected'
+}
+
+fn test_vector_multiple_buffers() {
+	mut s := new_vector({
+		'batch.max_events': '10000'
+	})
+	for i in 0 .. 10 {
+		ev := event.Event(event.new_log('event ${i}'))
+		s.send(ev) or {}
+	}
+	assert s.total_buffered() == 10
+}
