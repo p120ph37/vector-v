@@ -6,9 +6,9 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
 
 - `src/` — V source code
   - `vrl/` — VRL (Vector Remap Language) interpreter and runtime
-  - `sources/` — Data ingestion components (stdin, demo_logs, fluent)
+  - `sources/` — Data ingestion components (stdin, demo_logs, fluent, exec, file_descriptors, http_client, socket, websocket, vector, statsd, prometheus, aws_s3, aws_sqs, aws_kinesis_firehose, aws_ecs_metrics)
   - `transforms/` — Data processing (remap, filter, reduce, aws_ec2_metadata, dedupe, sample, throttle, exclusive_route, passthrough, log_to_metric, metric_to_log, aggregate, tag_cardinality_limit, window)
-  - `sinks/` — Data output destinations (console, blackhole, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics)
+  - `sinks/` — Data output destinations (console, blackhole, http, file, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, aws_s3, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, socket, vector, websocket, statsd, prometheus)
   - `aws/` — Shared AWS utilities (credentials resolution, SigV4 signing)
   - `event/` — Event types (log, metric, trace)
   - `topology/` — Component graph management with input-based routing
@@ -62,7 +62,7 @@ make coverage-clean                              # Remove .coverage/ artifacts
 
 ## Implemented Components
 
-### Sources (9 / 27 upstream)
+### Sources (15 / 27 upstream)
 - **stdin** — Reads lines from stdin
 - **demo_logs** — Generates sample log events
 - **fluent** — Fluent Forward Protocol v1 over TCP (msgpack)
@@ -72,6 +72,12 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **socket** — Listen on TCP/UDP sockets with shared line-buffered framing
 - **websocket** — Connect to WebSocket servers and receive messages
 - **vector** — Receive events from other Vector instances (JSON-over-TCP)
+- **statsd** — StatsD protocol receiver (UDP/TCP, DogStatsD tag extension)
+- **prometheus** — Prometheus exposition format scraper (counter, gauge, histogram, summary)
+- **aws_s3** — S3 bucket polling via ListObjectsV2/GetObject (SigV4-signed)
+- **aws_sqs** — SQS message consumption via ReceiveMessage/DeleteMessage (SigV4-signed)
+- **aws_kinesis_firehose** — HTTP endpoint for Kinesis Data Firehose delivery streams
+- **aws_ecs_metrics** — ECS task metadata endpoint scraper (container CPU, memory, network)
 
 ### Transforms (14 / 15 upstream)
 - **remap** — VRL program execution
@@ -89,7 +95,7 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **tag_cardinality_limit** — Limit high-cardinality metric tags (drop_tag or drop_event)
 - **window** — Group log events into time-based windows with optional group_by
 
-### Sinks (12 / 43 upstream)
+### Sinks (16 / 43 upstream)
 - **console** — Write to stdout/stderr (json, text, logfmt)
 - **blackhole** — Discard events (benchmarking)
 - **http** — Generic HTTP sink (json, text, ndjson); shared base layer for protocol-specific HTTP sinks
@@ -102,6 +108,11 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **opentelemetry** — OTLP HTTP logs export
 - **aws_cloudwatch_logs** — AWS CloudWatch Logs via PutLogEvents API (SigV4-signed)
 - **aws_cloudwatch_metrics** — AWS CloudWatch Metrics via Embedded Metric Format (EMF over CloudWatch Logs)
+- **statsd** — StatsD line protocol sender (UDP/TCP, DogStatsD tags)
+- **prometheus** — Prometheus Pushgateway text format push (counter, gauge, histogram, summary)
+- **aws_kinesis_streams** — Kinesis Data Streams via PutRecords API (SigV4-signed, base64-encoded)
+- **aws_kinesis_firehose** — Kinesis Data Firehose via PutRecordBatch API (SigV4-signed, base64-encoded)
+- **aws_sqs** — SQS message sending via SendMessageBatch API (SigV4-signed, FIFO support)
 
 ### API
 - `GET /health` — Liveness check

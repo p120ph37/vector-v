@@ -12,6 +12,12 @@ pub type Source = StdinSource
 	| SocketSource
 	| WebSocketSource
 	| VectorSource
+	| StatsdSource
+	| PrometheusSource
+	| S3Source
+	| SqsSource
+	| KinesisFirehoseSource
+	| EcsMetricsSource
 
 // build_source creates a Source from a type name and config options.
 pub fn build_source(typ string, opts map[string]string) !Source {
@@ -42,6 +48,24 @@ pub fn build_source(typ string, opts map[string]string) !Source {
 		}
 		'vector' {
 			return Source(new_vector_source(opts))
+		}
+		'statsd' {
+			return Source(new_statsd(opts))
+		}
+		'prometheus', 'prometheus_scrape' {
+			return Source(new_prometheus(opts)!)
+		}
+		'aws_s3' {
+			return Source(new_s3_source(opts)!)
+		}
+		'aws_sqs' {
+			return Source(new_sqs(opts)!)
+		}
+		'aws_kinesis_firehose' {
+			return Source(new_kinesis_firehose(opts))
+		}
+		'aws_ecs_metrics' {
+			return Source(new_ecs_metrics(opts))
 		}
 		else {
 			return error('unknown source type: "${typ}"')
@@ -77,6 +101,24 @@ pub fn run_source(s Source, output chan event.Event) {
 			s.run(output)
 		}
 		VectorSource {
+			s.run(output)
+		}
+		StatsdSource {
+			s.run(output)
+		}
+		PrometheusSource {
+			s.run(output)
+		}
+		S3Source {
+			s.run(output)
+		}
+		SqsSource {
+			s.run(output)
+		}
+		KinesisFirehoseSource {
+			s.run(output)
+		}
+		EcsMetricsSource {
 			s.run(output)
 		}
 	}

@@ -15,6 +15,11 @@ pub type Sink = ConsoleSink
 	| WebSocketSink
 	| VectorSink
 	| SocketSink
+	| StatsdSink
+	| PrometheusSink
+	| KinesisSink
+	| KinesisFirehoseSink
+	| SqsSink
 
 // build_sink creates a Sink from a type name and config options.
 pub fn build_sink(typ string, opts map[string]string) !Sink {
@@ -54,6 +59,21 @@ pub fn build_sink(typ string, opts map[string]string) !Sink {
 		}
 		'socket' {
 			return Sink(new_socket_sink(opts)!)
+		}
+		'statsd' {
+			return Sink(new_statsd_sink(opts)!)
+		}
+		'prometheus', 'prometheus_remote_write' {
+			return Sink(new_prometheus_sink(opts)!)
+		}
+		'aws_kinesis_streams' {
+			return Sink(new_kinesis(opts)!)
+		}
+		'aws_kinesis_firehose' {
+			return Sink(new_kinesis_firehose(opts)!)
+		}
+		'aws_sqs' {
+			return Sink(new_sqs(opts)!)
 		}
 		else {
 			return error('unknown sink type: "${typ}"')
@@ -110,6 +130,26 @@ pub fn send_to_sink(s Sink, e event.Event) ! {
 		SocketSink {
 			mut sks := s
 			sks.send(e)!
+		}
+		StatsdSink {
+			mut ss := s
+			ss.send(e)!
+		}
+		PrometheusSink {
+			mut ps := s
+			ps.send(e)!
+		}
+		KinesisSink {
+			mut ks := s
+			ks.send(e)!
+		}
+		KinesisFirehoseSink {
+			mut kfs := s
+			kfs.send(e)!
+		}
+		SqsSink {
+			mut sqs := s
+			sqs.send(e)!
 		}
 	}
 }
