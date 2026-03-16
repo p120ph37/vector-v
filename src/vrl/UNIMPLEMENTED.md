@@ -8,39 +8,22 @@ All upstream VRL functions are implemented.
 
 ## Unimplemented Vector Components
 
-### Sources (12 not implemented)
-| Source | Notes |
-|--------|-------|
-| file | File-based log tailing |
-| heroku_logplex | Heroku Logplex drain receiver |
-| http_server | HTTP endpoint receiver (Vector-V has http_client source) |
-| internal_logs | Vector's own internal log events |
-| internal_metrics | Vector's own internal metrics |
-| journald | systemd journal reader |
-| logstash | Logstash protocol receiver |
-| postgresql_metrics | PostgreSQL server metrics scraper |
-| prometheus_pushgateway | Prometheus Pushgateway receiver (Vector-V has prometheus scrape) |
-| prometheus_remote_write | Prometheus remote write receiver |
-| static_metrics | Static/fixed metric values |
-| syslog | Syslog protocol receiver (RFC 3164/5424) |
+### Sources (0 not implemented)
 
-### Transforms (4 not implemented)
+All 46 upstream sources are implemented.
+
+### Transforms (1 not implemented)
 | Transform | Notes |
 |-----------|-------|
-| incremental_to_absolute | Convert incremental metrics to absolute |
-| lua | Lua scripting (V has no Lua FFI) |
-| route | Multi-output conditional routing (Vector-V has exclusive_route) |
-| trace_to_log | Convert trace spans to log events |
+| lua | Lua scripting (V has no Lua FFI — not planned) |
 
 Note: Vector-V includes `passthrough` (identity transform) which is not in upstream Vector.
 
-### Sinks (31 not implemented)
+### Sinks (27 not implemented)
 | Sink | Notes |
 |------|-------|
 | appsignal | AppSignal metrics/logs |
-| aws_sns | AWS SNS message publishing |
 | axiom | Axiom log ingestion |
-| azure_logs_ingestion | Azure Logs Ingestion API (DCR/DCE) |
 | clickhouse | ClickHouse database insert |
 | databend | Databend database insert |
 | datadog_events | Datadog Events API (Vector-V has datadog logs only) |
@@ -48,8 +31,6 @@ Note: Vector-V includes `passthrough` (identity transform) which is not in upstr
 | datadog_traces | Datadog Traces API |
 | doris | Apache Doris database insert |
 | elasticsearch | Elasticsearch bulk API |
-| gcp_chronicle | GCP Chronicle unstructured log ingestion |
-| gcp_cloud_monitoring | GCP Cloud Monitoring (metrics) |
 | greptimedb_logs | GreptimeDB log ingestion |
 | greptimedb_metrics | GreptimeDB metrics ingestion |
 | honeycomb | Honeycomb events API |

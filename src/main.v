@@ -21,7 +21,7 @@ fn main() {
 
 	if args.config_path.len == 0 {
 		eprintln('error: no configuration file specified')
-		eprintln('usage: vector-v -c <config.toml>')
+		eprintln('usage: vector-v -c <config.toml|yaml|json>')
 		eprintln('run vector-v --help for more information')
 		exit(1)
 	}
@@ -35,7 +35,7 @@ fn main() {
 		eprintln('info: loading config from ${args.config_path}')
 	}
 
-	pipeline_cfg := conf.parse_toml_config(content) or {
+	pipeline_cfg := conf.parse_config(content, args.config_path) or {
 		eprintln('error: invalid configuration: ${err}')
 		exit(1)
 	}

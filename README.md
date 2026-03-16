@@ -9,12 +9,12 @@ A V-lang re-implementation of [Vector](https://github.com/vectordotdev/vector) �
 ### What works today
 
 - **Core event model**: `LogEvent`, `Metric`, `TraceEvent` (mirroring Vector's event types)
-- **Config system**: TOML configuration parsing with topology validation
+- **Config system**: TOML, YAML, and JSON configuration parsing with auto-detection and topology validation
 - **Pipeline runtime**: Multi-threaded source → transform → sink pipeline with channel-based communication and input-based routing (fan-in/fan-out)
 - **VRL**: Full Vector Remap Language interpreter with ~201 stdlib functions implemented
-- **Sources** (34): stdin, demo_logs, fluent, exec, file_descriptors, http_client, socket, websocket, vector, statsd, prometheus, aws_s3, aws_sqs, aws_kinesis_firehose, aws_ecs_metrics, opentelemetry, splunk_hec, redis, datadog_agent, host_metrics, docker_logs, kubernetes_logs, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, apache_metrics, nginx_metrics, mongodb_metrics, eventstoredb_metrics, dnstap, okta
-- **Transforms** (14): remap, filter, reduce, aws_ec2_metadata, dedupe, sample, throttle, exclusive_route, passthrough, log_to_metric, metric_to_log, aggregate, tag_cardinality_limit, window
-- **Sinks** (30): console, blackhole, http, file, aws_s3, websocket, socket, vector, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, statsd, prometheus, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, splunk_hec, datadog, redis, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, azure_blob, azure_monitor_logs, gcp_cloud_storage, gcp_stackdriver
+- **Sources** (46): stdin, demo_logs, fluent, exec, file_descriptors, http_client, socket, websocket, vector, statsd, prometheus, aws_s3, aws_sqs, aws_kinesis_firehose, aws_ecs_metrics, opentelemetry, splunk_hec, redis, datadog_agent, host_metrics, docker_logs, kubernetes_logs, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, apache_metrics, nginx_metrics, mongodb_metrics, eventstoredb_metrics, dnstap, okta, file, syslog, http_server, static_metrics, internal_logs, internal_metrics, prometheus_remote_write, prometheus_pushgateway, heroku_logplex, journald, logstash, postgresql_metrics
+- **Transforms** (16): remap, filter, reduce, aws_ec2_metadata, dedupe, sample, throttle, exclusive_route, passthrough, log_to_metric, metric_to_log, aggregate, tag_cardinality_limit, window, route, trace_to_log, incremental_to_absolute
+- **Sinks** (34): console, blackhole, http, file, aws_s3, websocket, socket, vector, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, statsd, prometheus, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, splunk_hec, datadog, redis, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, azure_blob, azure_monitor_logs, gcp_cloud_storage, gcp_stackdriver, aws_sns, azure_logs_ingestion, gcp_chronicle, gcp_cloud_monitoring
 - **API**: REST health/readiness endpoints (`GET /health`, `GET /ready`)
 - **CLI**: `--config`, `--validate`, `--verbose`, `--version`, `--help`
 
@@ -60,9 +60,10 @@ make test-vrl                    # VRL tests via Makefile
 
 ## Configuration
 
-Vector-V uses the same TOML configuration format as Vector:
+Vector-V supports TOML, YAML, and JSON configuration formats (auto-detected by file extension or content):
 
 ```toml
+# config.toml
 [sources.in]
 type = "stdin"
 
@@ -77,13 +78,30 @@ inputs = ["enrich"]
 encoding.codec = "json"
 ```
 
+```yaml
+# config.yaml
+sources:
+  in:
+    type: stdin
+transforms:
+  enrich:
+    type: remap
+    inputs: [in]
+    source: '.environment = "production"'
+sinks:
+  out:
+    type: console
+    inputs: [enrich]
+    encoding.codec: json
+```
+
 ## Architecture
 
 ```
 src/
 ├── main.v                  # Entry point and CLI
 ├── cliargs/args.v          # Command-line argument parsing
-├── conf/config.v           # TOML config parser and topology validation
+├── conf/                   # Config parsing (TOML, YAML, JSON with auto-detection)
 ├── event/                  # Core event model
 │   ├── event.v             # Event sum type (Log | Metric | Trace)
 │   ├── log.v               # LogEvent, Value type, metadata
@@ -95,11 +113,11 @@ src/
 │   ├── runtime.v           # AST interpreter
 │   ├── objectmap.v         # Adaptive flat-array/hashmap
 │   └── stdlib*.v           # ~201 standard library functions
-├── sources/                # Data ingestion (34 components)
+├── sources/                # Data ingestion (46 components)
 │   └── registry.v          # Source type registry
-├── transforms/             # Data processing (14 components)
+├── transforms/             # Data processing (16 components)
 │   └── registry.v          # Transform type registry
-├── sinks/                  # Data output (30 components)
+├── sinks/                  # Data output (34 components)
 │   ├── http_client.v       # Shared HTTP batching infrastructure
 │   └── registry.v          # Sink type registry
 ├── aws/                    # Shared AWS utilities (credentials, SigV4)

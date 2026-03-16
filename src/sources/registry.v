@@ -37,6 +37,18 @@ pub type Source = StdinSource
 	| EventStoreDbMetricsSource
 	| DnstapSource
 	| OktaSource
+	| FileSource
+	| SyslogSource
+	| HttpServerSource
+	| StaticMetricsSource
+	| HerokuLogplexSource
+	| JournaldSource
+	| LogstashSource
+	| PostgresqlMetricsSource
+	| InternalLogsSource
+	| InternalMetricsSource
+	| PrometheusRemoteWriteSource
+	| PrometheusPushgatewaySource
 
 // build_source creates a Source from a type name and config options.
 pub fn build_source(typ string, opts map[string]string) !Source {
@@ -142,6 +154,42 @@ pub fn build_source(typ string, opts map[string]string) !Source {
 		}
 		'okta' {
 			return Source(new_okta(opts)!)
+		}
+		'file' {
+			return Source(new_file(opts)!)
+		}
+		'syslog' {
+			return Source(new_syslog(opts))
+		}
+		'http_server' {
+			return Source(new_http_server(opts))
+		}
+		'static_metrics' {
+			return Source(new_static_metrics(opts))
+		}
+		'heroku_logplex' {
+			return Source(new_heroku_logplex(opts))
+		}
+		'journald' {
+			return Source(new_journald(opts))
+		}
+		'logstash' {
+			return Source(new_logstash(opts))
+		}
+		'postgresql_metrics' {
+			return Source(new_postgresql_metrics(opts))
+		}
+		'internal_logs' {
+			return Source(new_internal_logs(opts))
+		}
+		'internal_metrics' {
+			return Source(new_internal_metrics(opts))
+		}
+		'prometheus_remote_write' {
+			return Source(new_prometheus_remote_write(opts))
+		}
+		'prometheus_pushgateway' {
+			return Source(new_prometheus_pushgateway(opts))
 		}
 		else {
 			return error('unknown source type: "${typ}"')
@@ -252,6 +300,42 @@ pub fn run_source(s Source, output chan event.Event) {
 			s.run(output)
 		}
 		OktaSource {
+			s.run(output)
+		}
+		FileSource {
+			s.run(output)
+		}
+		SyslogSource {
+			s.run(output)
+		}
+		HttpServerSource {
+			s.run(output)
+		}
+		StaticMetricsSource {
+			s.run(output)
+		}
+		HerokuLogplexSource {
+			s.run(output)
+		}
+		JournaldSource {
+			s.run(output)
+		}
+		LogstashSource {
+			s.run(output)
+		}
+		PostgresqlMetricsSource {
+			s.run(output)
+		}
+		InternalLogsSource {
+			s.run(output)
+		}
+		InternalMetricsSource {
+			s.run(output)
+		}
+		PrometheusRemoteWriteSource {
+			s.run(output)
+		}
+		PrometheusPushgatewaySource {
 			s.run(output)
 		}
 	}

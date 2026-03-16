@@ -33,6 +33,10 @@ pub type Sink = ConsoleSink
 	| AzureMonitorLogsSink
 	| GcpCloudStorageSink
 	| GcpStackdriverSink
+	| SnsSink
+	| AzureLogsIngestionSink
+	| GcpChronicleSink
+	| GcpCloudMonitoringSink
 
 // build_sink creates a Sink from a type name and config options.
 pub fn build_sink(typ string, opts map[string]string) !Sink {
@@ -126,6 +130,18 @@ pub fn build_sink(typ string, opts map[string]string) !Sink {
 		}
 		'gcp_stackdriver', 'gcp_stackdriver_logs', 'gcp_cloud_logging' {
 			return Sink(new_gcp_stackdriver(opts)!)
+		}
+		'aws_sns' {
+			return Sink(new_sns(opts)!)
+		}
+		'azure_logs_ingestion' {
+			return Sink(new_azure_logs_ingestion(opts)!)
+		}
+		'gcp_chronicle', 'gcp_chronicle_unstructured' {
+			return Sink(new_gcp_chronicle(opts)!)
+		}
+		'gcp_cloud_monitoring', 'gcp_stackdriver_metrics' {
+			return Sink(new_gcp_cloud_monitoring(opts)!)
 		}
 		else {
 			return error('unknown sink type: "${typ}"')
@@ -254,6 +270,22 @@ pub fn send_to_sink(s Sink, e event.Event) ! {
 		GcpStackdriverSink {
 			mut gss := s
 			gss.send(e)!
+		}
+		SnsSink {
+			mut sns := s
+			sns.send(e)!
+		}
+		AzureLogsIngestionSink {
+			mut ali := s
+			ali.send(e)!
+		}
+		GcpChronicleSink {
+			mut gc := s
+			gc.send(e)!
+		}
+		GcpCloudMonitoringSink {
+			mut gcm := s
+			gcm.send(e)!
 		}
 	}
 }

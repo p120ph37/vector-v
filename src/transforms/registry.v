@@ -16,6 +16,9 @@ pub type Transform = RemapTransform
 	| AggregateTransform
 	| TagCardinalityLimitTransform
 	| WindowTransform
+	| RouteTransform
+	| TraceToLogTransform
+	| IncrementalToAbsoluteTransform
 
 // build_transform creates a Transform from a type name and config options.
 pub fn build_transform(typ string, opts map[string]string) !Transform {
@@ -58,6 +61,15 @@ pub fn build_transform(typ string, opts map[string]string) !Transform {
 		}
 		'window' {
 			return Transform(new_window(opts)!)
+		}
+		'route' {
+			return Transform(new_route(opts)!)
+		}
+		'trace_to_log' {
+			return Transform(new_trace_to_log(opts)!)
+		}
+		'incremental_to_absolute' {
+			return Transform(new_incremental_to_absolute(opts)!)
 		}
 		else {
 			return error('unknown transform type: "${typ}"')
@@ -105,6 +117,15 @@ pub fn apply_transform(mut t Transform, e event.Event) ![]event.Event {
 			return t.transform(e)
 		}
 		WindowTransform {
+			return t.transform(e)
+		}
+		RouteTransform {
+			return t.transform(e)
+		}
+		TraceToLogTransform {
+			return t.transform(e)
+		}
+		IncrementalToAbsoluteTransform {
 			return t.transform(e)
 		}
 	}

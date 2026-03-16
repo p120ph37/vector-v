@@ -6,13 +6,13 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
 
 - `src/` — V source code
   - `vrl/` — VRL (Vector Remap Language) interpreter and runtime
-  - `sources/` — Data ingestion components (stdin, demo_logs, fluent, exec, file_descriptors, http_client, socket, websocket, vector, statsd, prometheus, aws_s3, aws_sqs, aws_kinesis_firehose, aws_ecs_metrics, opentelemetry, splunk_hec, redis, datadog_agent, host_metrics, docker_logs, kubernetes_logs, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, apache_metrics, nginx_metrics, mongodb_metrics, eventstoredb_metrics, dnstap, okta)
-  - `transforms/` — Data processing (remap, filter, reduce, aws_ec2_metadata, dedupe, sample, throttle, exclusive_route, passthrough, log_to_metric, metric_to_log, aggregate, tag_cardinality_limit, window)
-  - `sinks/` — Data output destinations (console, blackhole, http, file, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, aws_s3, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, socket, vector, websocket, statsd, prometheus, splunk_hec, datadog, redis, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, azure_blob, azure_monitor_logs, gcp_cloud_storage, gcp_stackdriver)
+  - `sources/` — Data ingestion components (stdin, demo_logs, fluent, exec, file_descriptors, http_client, socket, websocket, vector, statsd, prometheus, aws_s3, aws_sqs, aws_kinesis_firehose, aws_ecs_metrics, opentelemetry, splunk_hec, redis, datadog_agent, host_metrics, docker_logs, kubernetes_logs, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, apache_metrics, nginx_metrics, mongodb_metrics, eventstoredb_metrics, dnstap, okta, file, syslog, http_server, static_metrics, internal_logs, internal_metrics, prometheus_remote_write, prometheus_pushgateway, heroku_logplex, journald, logstash, postgresql_metrics)
+  - `transforms/` — Data processing (remap, filter, reduce, aws_ec2_metadata, dedupe, sample, throttle, exclusive_route, passthrough, log_to_metric, metric_to_log, aggregate, tag_cardinality_limit, window, route, trace_to_log, incremental_to_absolute)
+  - `sinks/` — Data output destinations (console, blackhole, http, file, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, aws_s3, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, socket, vector, websocket, statsd, prometheus, splunk_hec, datadog, redis, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, azure_blob, azure_monitor_logs, gcp_cloud_storage, gcp_stackdriver, aws_sns, azure_logs_ingestion, gcp_chronicle, gcp_cloud_monitoring)
   - `aws/` — Shared AWS utilities (credentials resolution, SigV4 signing)
   - `event/` — Event types (log, metric, trace)
   - `topology/` — Component graph management with input-based routing
-  - `conf/` — TOML configuration parsing
+  - `conf/` — Configuration parsing (TOML, YAML, JSON with auto-detection)
   - `api/` — REST API server (health/ready endpoints)
   - `cliargs/` — Command-line argument parsing
   - `mockserver/` — Declarative mock HTTP server for testing network components
@@ -62,7 +62,7 @@ make coverage-clean                              # Remove .coverage/ artifacts
 
 ## Implemented Components
 
-### Sources (34 / 46 upstream)
+### Sources (46 / 46 upstream)
 - **stdin** — Reads lines from stdin
 - **demo_logs** — Generates sample log events
 - **fluent** — Fluent Forward Protocol v1 over TCP (msgpack)
@@ -97,8 +97,20 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **eventstoredb_metrics** — EventStoreDB stats endpoint scraper (process, system, queue metrics)
 - **dnstap** — DNS tap protocol receiver (Frame Streams, protobuf wire format)
 - **okta** — Okta System Log API poller (security/audit events, actor/outcome tracking)
+- **file** — File-based log tailing with glob patterns
+- **syslog** — RFC 3164/5424 syslog receiver (TCP/UDP)
+- **http_server** — HTTP POST endpoint for event ingestion
+- **static_metrics** — Fixed metric value emitter
+- **internal_logs** — Captures Vector-V's own logs (message, level, module, target)
+- **internal_metrics** — Vector-V internal telemetry (component_received/sent_events_total, errors, uptime)
+- **prometheus_remote_write** — HTTP /api/v1/write endpoint for Prometheus remote write
+- **prometheus_pushgateway** — HTTP /metrics/job/{job} endpoint for Prometheus Pushgateway
+- **heroku_logplex** — Heroku Logplex drain receiver
+- **journald** — systemd journal via `journalctl -f -o json`
+- **logstash** — JSON-over-TCP receiver (Logstash protocol)
+- **postgresql_metrics** — PostgreSQL metrics scraper (connections, transactions, tuple ops)
 
-### Transforms (14 / 17 upstream)
+### Transforms (16 / 17 upstream)
 - **remap** — VRL program execution
 - **filter** — Condition-based event filtering
 - **reduce** — Event accumulation with merge strategies
@@ -113,8 +125,11 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **aggregate** — Aggregate metrics over time intervals (sum counters, latest gauge, union sets)
 - **tag_cardinality_limit** — Limit high-cardinality metric tags (drop_tag or drop_event)
 - **window** — Group log events into time-based windows with optional group_by
+- **route** — Multi-output routing (sends to all matching routes)
+- **trace_to_log** — Convert trace events to structured log events
+- **incremental_to_absolute** — Convert incremental metrics to absolute with running state
 
-### Sinks (30 / 61 upstream)
+### Sinks (34 / 61 upstream)
 - **console** — Write to stdout/stderr (json, text, logfmt)
 - **blackhole** — Discard events (benchmarking)
 - **http** — Generic HTTP sink (json, text, ndjson); shared base layer for protocol-specific HTTP sinks
@@ -145,6 +160,10 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **azure_monitor_logs** — Azure Monitor Logs via Data Collector API (Shared Key auth, Log Analytics workspace)
 - **gcp_cloud_storage** — Google Cloud Storage object upload via JSON API (batched, strftime partitioning)
 - **gcp_stackdriver** — Google Cloud Logging (Stackdriver) via entries.write REST API (batched, resource labels)
+- **aws_sns** — AWS SNS message publishing via Publish API (SigV4-signed)
+- **azure_logs_ingestion** — Azure Logs Ingestion API (DCR/DCE, Bearer token auth)
+- **gcp_chronicle** — GCP Chronicle unstructured log ingestion (regional endpoints, batch API)
+- **gcp_cloud_monitoring** — GCP Cloud Monitoring timeSeries.create API (gauge, counter, distribution)
 
 ### API
 - `GET /health` — Liveness check
