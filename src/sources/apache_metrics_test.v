@@ -194,15 +194,15 @@ fn test_apache_scoreboard_counts_all_states() {
 	assert counts.len == 11
 }
 
-fn test_apache_base64() {
+fn test_apache_sources_base64() {
 	// Standard base64 test vectors
-	assert apache_base64('') == ''
-	assert apache_base64('f') == 'Zg=='
-	assert apache_base64('fo') == 'Zm8='
-	assert apache_base64('foo') == 'Zm9v'
-	assert apache_base64('foob') == 'Zm9vYg=='
-	assert apache_base64('fooba') == 'Zm9vYmE='
-	assert apache_base64('foobar') == 'Zm9vYmFy'
+	assert sources_base64('') == ''
+	assert sources_base64('f') == 'Zg=='
+	assert sources_base64('fo') == 'Zm8='
+	assert sources_base64('foo') == 'Zm9v'
+	assert sources_base64('foob') == 'Zm9vYg=='
+	assert sources_base64('fooba') == 'Zm9vYmE='
+	assert sources_base64('foobar') == 'Zm9vYmFy'
 	// Auth-relevant test
-	assert apache_base64('admin:secret') == 'YWRtaW46c2VjcmV0'
+	assert sources_base64('admin:secret') == 'YWRtaW46c2VjcmV0'
 }

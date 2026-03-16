@@ -54,14 +54,7 @@ pub fn new_apache_metrics(opts map[string]string) !ApacheMetricsSource {
 
 	namespace := opts['namespace'] or { 'apache' }
 
-	mut auth_header := ''
-	if user := opts['auth.user'] {
-		password := opts['auth.password'] or { '' }
-		auth_header = 'Basic ' + apache_base64('${user}:${password}')
-	}
-	if token := opts['auth.token'] {
-		auth_header = 'Bearer ${token}'
-	}
+	auth_header := parse_auth_header(opts)
 
 	return ApacheMetricsSource{
 		endpoints: endpoints
@@ -236,29 +229,3 @@ pub fn apache_scoreboard_counts(scoreboard string) map[string]int {
 	return counts
 }
 
-// apache_base64 is a minimal base64 encoder for auth headers.
-fn apache_base64(s string) string {
-	alphabet := 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-	mut result := []u8{}
-	bytes := s.bytes()
-	mut i := 0
-	for i < bytes.len {
-		b0 := bytes[i]
-		b1 := if i + 1 < bytes.len { bytes[i + 1] } else { u8(0) }
-		b2 := if i + 2 < bytes.len { bytes[i + 2] } else { u8(0) }
-		result << alphabet[b0 >> 2]
-		result << alphabet[((b0 & 0x03) << 4) | (b1 >> 4)]
-		if i + 1 < bytes.len {
-			result << alphabet[((b1 & 0x0f) << 2) | (b2 >> 6)]
-		} else {
-			result << `=`
-		}
-		if i + 2 < bytes.len {
-			result << alphabet[b2 & 0x3f]
-		} else {
-			result << `=`
-		}
-		i += 3
-	}
-	return result.bytestr()
-}

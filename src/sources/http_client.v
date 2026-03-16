@@ -58,14 +58,7 @@ pub fn new_http_client(opts map[string]string) !HttpClientSource {
 		}
 	}
 
-	mut auth_header := ''
-	if user := opts['auth.user'] {
-		password := opts['auth.password'] or { '' }
-		auth_header = 'Basic ' + simple_base64('${user}:${password}')
-	}
-	if token := opts['auth.token'] {
-		auth_header = 'Bearer ${token}'
-	}
+	auth_header := parse_auth_header(opts)
 
 	codec := match opts['decoding.codec'] or { 'bytes' } {
 		'json' { HttpClientCodec.json_codec }
@@ -136,29 +129,3 @@ fn (s &HttpClientSource) scrape(output chan event.Event) {
 	output <- event.Event(ev)
 }
 
-// simple_base64 is a minimal base64 encoder for auth headers.
-fn simple_base64(s string) string {
-	alphabet := 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-	mut result := []u8{}
-	bytes := s.bytes()
-	mut i := 0
-	for i < bytes.len {
-		b0 := bytes[i]
-		b1 := if i + 1 < bytes.len { bytes[i + 1] } else { u8(0) }
-		b2 := if i + 2 < bytes.len { bytes[i + 2] } else { u8(0) }
-		result << alphabet[b0 >> 2]
-		result << alphabet[((b0 & 0x03) << 4) | (b1 >> 4)]
-		if i + 1 < bytes.len {
-			result << alphabet[((b1 & 0x0f) << 2) | (b2 >> 6)]
-		} else {
-			result << `=`
-		}
-		if i + 2 < bytes.len {
-			result << alphabet[b2 & 0x3f]
-		} else {
-			result << `=`
-		}
-		i += 3
-	}
-	return result.bytestr()
-}

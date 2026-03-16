@@ -10,16 +10,24 @@ import time
 // Config options:
 //   endpoints:             Comma-separated list of URLs to scrape (required)
 //   scrape_interval_secs:  Polling interval in seconds (default: 15)
+//   scrape_timeout_secs:   Timeout for each scrape request in seconds (default: 5)
 //   auth.user/password:    Basic auth
 //   auth.token:            Bearer token
-//   honor_labels:          Whether to keep existing labels (default: true)
-//   instance:              Instance label to add to all metrics
+//   tls.enabled:           Enable TLS (default: false)
+//   honor_labels:          If true, keep existing labels; if false, rename to exported_ (default: false)
+//   instance_tag:          Tag name for host:port of scraped instance (default: "instance", set "" to disable)
+//   endpoint_tag:          Tag name for scraped endpoint URL (default: "endpoint", set "" to disable)
+//   query.*:               Custom query parameters appended to endpoint URLs
 pub struct PrometheusSource {
 	endpoints        []string
 	scrape_interval  time.Duration = 15 * time.second
+	scrape_timeout   time.Duration = 5 * time.second
 	auth_header      string
-	honor_labels     bool = true
-	instance         string
+	honor_labels     bool
+	instance_tag     string = 'instance'
+	endpoint_tag     string = 'endpoint'
+	query            map[string]string
+	tls_enabled      bool
 }
 
 // new_prometheus creates a new PrometheusSource from config options.
@@ -46,26 +54,55 @@ pub fn new_prometheus(opts map[string]string) !PrometheusSource {
 		}
 	}
 
-	mut auth_header := ''
-	if user := opts['auth.user'] {
-		password := opts['auth.password'] or { '' }
-		auth_header = 'Basic ' + prom_base64('${user}:${password}')
-	}
-	if token := opts['auth.token'] {
-		auth_header = 'Bearer ${token}'
+	mut timeout_secs := 5.0
+	if s := opts['scrape_timeout_secs'] {
+		timeout_secs = s.f64()
+		if timeout_secs <= 0 {
+			timeout_secs = 5.0
+		}
 	}
 
-	honor_str := opts['honor_labels'] or { 'true' }
-	honor_labels := honor_str != 'false'
+	auth_header := parse_auth_header(opts)
 
-	instance := opts['instance'] or { '' }
+	honor_str := opts['honor_labels'] or { 'false' }
+	honor_labels := honor_str == 'true'
+
+	instance_tag := opts['instance_tag'] or { 'instance' }
+	endpoint_tag := opts['endpoint_tag'] or { 'endpoint' }
+
+	mut query := map[string]string{}
+	for k, v in opts {
+		if k.starts_with('query.') {
+			query[k[6..]] = v
+		}
+	}
+
+	tls_enabled := if tls_opt := opts['tls.enabled'] {
+		tls_opt == 'true'
+	} else {
+		false
+	}
+
+	// Upgrade http:// to https:// when TLS is enabled
+	mut final_endpoints := endpoints.clone()
+	if tls_enabled {
+		for i, ep in final_endpoints {
+			if ep.starts_with('http://') {
+				final_endpoints[i] = 'https://' + ep[7..]
+			}
+		}
+	}
 
 	return PrometheusSource{
-		endpoints: endpoints
+		endpoints: final_endpoints
 		scrape_interval: time.Duration(i64(scrape_secs * 1_000_000_000))
+		scrape_timeout: time.Duration(i64(timeout_secs * 1_000_000_000))
 		auth_header: auth_header
 		honor_labels: honor_labels
-		instance: instance
+		instance_tag: instance_tag
+		endpoint_tag: endpoint_tag
+		query: query
+		tls_enabled: tls_enabled
 	}
 }
 
@@ -80,6 +117,9 @@ pub fn (s &PrometheusSource) run(output chan event.Event) {
 }
 
 fn (s &PrometheusSource) scrape(endpoint string, output chan event.Event) {
+	// Build URL with query parameters
+	url := build_scrape_url(endpoint, s.query)
+
 	mut header := http.Header{}
 	if s.auth_header.len > 0 {
 		header.add_custom('Authorization', s.auth_header) or {}
@@ -87,7 +127,7 @@ fn (s &PrometheusSource) scrape(endpoint string, output chan event.Event) {
 	header.add_custom('Accept', 'text/plain') or {}
 
 	resp := http.fetch(http.FetchConfig{
-		url: endpoint
+		url: url
 		method: .get
 		header: header
 		verbose: false
@@ -97,19 +137,129 @@ fn (s &PrometheusSource) scrape(endpoint string, output chan event.Event) {
 	}
 
 	if resp.status_code >= 400 {
-		eprintln('prometheus: HTTP ${resp.status_code} from ${endpoint}')
+		if resp.status_code == 404 && !endpoint.contains('/metrics') {
+			eprintln("prometheus: HTTP 404 from ${endpoint} — did you mean to use /metrics?")
+		} else {
+			eprintln('prometheus: HTTP ${resp.status_code} from ${endpoint}')
+		}
 		return
 	}
+
+	// Derive instance (host:port) and endpoint URL for tagging
+	instance_val := extract_host_port(endpoint)
 
 	metrics := parse_prometheus_text(resp.body)
 	for m in metrics {
 		mut metric := m
-		if s.instance.len > 0 {
-			metric.tags['instance'] = s.instance
+		// Apply instance_tag
+		if s.instance_tag.len > 0 {
+			apply_tag(mut metric, s.instance_tag, instance_val, s.honor_labels)
+		}
+		// Apply endpoint_tag
+		if s.endpoint_tag.len > 0 {
+			apply_tag(mut metric, s.endpoint_tag, url, s.honor_labels)
 		}
 		metric.meta.source_type = 'prometheus'
 		output <- event.Event(metric)
 	}
+}
+
+// apply_tag sets a tag on a metric, handling honor_labels logic.
+// If honor_labels is true and the tag already exists, the existing value is kept.
+// If honor_labels is false and the tag already exists, the existing value is
+// moved to exported_{tag} and the new value is set.
+fn apply_tag(mut metric event.Metric, tag string, value string, honor_labels bool) {
+	existing := metric.tags[tag] or { '' }
+	if existing.len > 0 {
+		if honor_labels {
+			// Keep existing value
+			return
+		}
+		// Rename existing to exported_{tag}
+		metric.tags['exported_${tag}'] = existing
+	}
+	metric.tags[tag] = value
+}
+
+// extract_host_port extracts host:port from a URL string.
+// Falls back to the raw endpoint if parsing fails.
+fn extract_host_port(endpoint string) string {
+	// Strip scheme
+	mut rest := endpoint
+	if rest.starts_with('https://') {
+		rest = rest[8..]
+	} else if rest.starts_with('http://') {
+		rest = rest[7..]
+	}
+	// Strip path
+	slash_idx := rest.index('/') or { -1 }
+	if slash_idx >= 0 {
+		rest = rest[..slash_idx]
+	}
+	// If no port, add default based on scheme
+	if !rest.contains(':') {
+		if endpoint.starts_with('https://') {
+			return '${rest}:443'
+		}
+		return '${rest}:80'
+	}
+	return rest
+}
+
+// build_scrape_url appends query parameters to an endpoint URL.
+fn build_scrape_url(endpoint string, query map[string]string) string {
+	if query.len == 0 {
+		return endpoint
+	}
+	mut parts := []string{}
+	for k, v in query {
+		parts << '${k}=${v}'
+	}
+	separator := if endpoint.contains('?') { '&' } else { '?' }
+	return '${endpoint}${separator}${parts.join("&")}'
+}
+
+// parse_auth_header extracts an Authorization header value from config options.
+// Supports auth.user/auth.password (Basic) and auth.token (Bearer).
+// Bearer takes precedence if both are specified.
+fn parse_auth_header(opts map[string]string) string {
+	mut auth_header := ''
+	if user := opts['auth.user'] {
+		password := opts['auth.password'] or { '' }
+		auth_header = 'Basic ' + sources_base64('${user}:${password}')
+	}
+	if token := opts['auth.token'] {
+		auth_header = 'Bearer ${token}'
+	}
+	return auth_header
+}
+
+// sources_base64 is a minimal base64 encoder for auth headers.
+// Shared across all sources that need Basic auth encoding.
+fn sources_base64(s string) string {
+	alphabet := 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+	mut result := []u8{}
+	bytes := s.bytes()
+	mut i := 0
+	for i < bytes.len {
+		b0 := bytes[i]
+		b1 := if i + 1 < bytes.len { bytes[i + 1] } else { u8(0) }
+		b2 := if i + 2 < bytes.len { bytes[i + 2] } else { u8(0) }
+		result << alphabet[b0 >> 2]
+		result << alphabet[((b0 & 0x03) << 4) | (b1 >> 4)]
+		if i + 1 < bytes.len {
+			result << alphabet[((b1 & 0x0f) << 2) | (b2 >> 6)]
+		} else {
+			result << `=`
+		}
+		if i + 2 < bytes.len {
+			result << alphabet[b2 & 0x3f]
+		} else {
+			result << `=`
+		}
+		i += 3
+	}
+	return result.bytestr()
 }
 
 // parse_prometheus_text parses Prometheus exposition format text into metrics.
@@ -425,31 +575,4 @@ fn filter_tag(tags map[string]string, exclude string) map[string]string {
 		}
 	}
 	return result
-}
-
-// prom_base64 is a minimal base64 encoder for auth headers.
-fn prom_base64(s string) string {
-	alphabet := 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-	mut result := []u8{}
-	bytes := s.bytes()
-	mut i := 0
-	for i < bytes.len {
-		b0 := bytes[i]
-		b1 := if i + 1 < bytes.len { bytes[i + 1] } else { u8(0) }
-		b2 := if i + 2 < bytes.len { bytes[i + 2] } else { u8(0) }
-		result << alphabet[b0 >> 2]
-		result << alphabet[((b0 & 0x03) << 4) | (b1 >> 4)]
-		if i + 1 < bytes.len {
-			result << alphabet[((b1 & 0x0f) << 2) | (b2 >> 6)]
-		} else {
-			result << `=`
-		}
-		if i + 2 < bytes.len {
-			result << alphabet[b2 & 0x3f]
-		} else {
-			result << `=`
-		}
-		i += 3
-	}
-	return result.bytestr()
 }

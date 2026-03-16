@@ -85,12 +85,12 @@ fn test_new_http_client_max_length() {
 	assert s.max_length == 4096
 }
 
-fn test_simple_base64() {
-	assert simple_base64('') == ''
-	assert simple_base64('f') == 'Zg=='
-	assert simple_base64('fo') == 'Zm8='
-	assert simple_base64('foo') == 'Zm9v'
-	assert simple_base64('foobar') == 'Zm9vYmFy'
+fn test_http_client_sources_base64() {
+	assert sources_base64('') == ''
+	assert sources_base64('f') == 'Zg=='
+	assert sources_base64('fo') == 'Zm8='
+	assert sources_base64('foo') == 'Zm9v'
+	assert sources_base64('foobar') == 'Zm9vYmFy'
 }
 
 fn test_new_http_client_invalid_interval() {

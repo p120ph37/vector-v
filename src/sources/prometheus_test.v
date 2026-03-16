@@ -188,7 +188,6 @@ fn test_parse_prometheus_timestamp() {
 	m := metrics[0]
 	assert m.name == 'my_metric'
 	// Timestamp should be 1234567890 seconds (1234567890000 ms)
-	// time.unix() returns microseconds in V
 	assert m.timestamp.unix() / 1_000_000 == 1234567890
 }
 
@@ -198,7 +197,14 @@ fn test_new_prometheus_source() {
 	src := new_prometheus(opts) or { panic(err.str()) }
 	assert src.endpoints.len == 1
 	assert src.endpoints[0] == 'http://localhost:9090/metrics'
-	assert src.honor_labels == true
+	// Upstream default: honor_labels is false
+	assert src.honor_labels == false
+	// Upstream default: instance_tag is "instance"
+	assert src.instance_tag == 'instance'
+	// Upstream default: endpoint_tag is "endpoint"
+	assert src.endpoint_tag == 'endpoint'
+	// Upstream default: scrape_timeout is 5s
+	assert src.scrape_timeout == 5_000_000_000
 }
 
 fn test_new_prometheus_source_missing_endpoint() {
@@ -250,20 +256,52 @@ fn test_new_prometheus_source_scrape_interval() {
 	assert src.scrape_interval == 30_000_000_000 // 30 seconds in nanoseconds
 }
 
-fn test_new_prometheus_source_honor_labels_false() {
+fn test_new_prometheus_source_honor_labels_true() {
 	mut opts := map[string]string{}
 	opts['endpoints'] = 'http://localhost:9090/metrics'
-	opts['honor_labels'] = 'false'
+	opts['honor_labels'] = 'true'
 	src := new_prometheus(opts) or { panic(err.str()) }
+	assert src.honor_labels == true
+}
+
+fn test_new_prometheus_source_honor_labels_default_false() {
+	mut opts := map[string]string{}
+	opts['endpoints'] = 'http://localhost:9090/metrics'
+	src := new_prometheus(opts) or { panic(err.str()) }
+	// Upstream default: honor_labels is false
 	assert src.honor_labels == false
 }
 
-fn test_new_prometheus_source_instance() {
+fn test_new_prometheus_source_instance_tag() {
 	mut opts := map[string]string{}
 	opts['endpoints'] = 'http://localhost:9090/metrics'
-	opts['instance'] = 'myhost:9090'
+	opts['instance_tag'] = 'myhost'
 	src := new_prometheus(opts) or { panic(err.str()) }
-	assert src.instance == 'myhost:9090'
+	assert src.instance_tag == 'myhost'
+}
+
+fn test_new_prometheus_source_endpoint_tag() {
+	mut opts := map[string]string{}
+	opts['endpoints'] = 'http://localhost:9090/metrics'
+	opts['endpoint_tag'] = 'target_url'
+	src := new_prometheus(opts) or { panic(err.str()) }
+	assert src.endpoint_tag == 'target_url'
+}
+
+fn test_new_prometheus_source_disable_instance_tag() {
+	mut opts := map[string]string{}
+	opts['endpoints'] = 'http://localhost:9090/metrics'
+	opts['instance_tag'] = ''
+	src := new_prometheus(opts) or { panic(err.str()) }
+	assert src.instance_tag == ''
+}
+
+fn test_new_prometheus_source_disable_endpoint_tag() {
+	mut opts := map[string]string{}
+	opts['endpoints'] = 'http://localhost:9090/metrics'
+	opts['endpoint_tag'] = ''
+	src := new_prometheus(opts) or { panic(err.str()) }
+	assert src.endpoint_tag == ''
 }
 
 fn test_new_prometheus_source_negative_scrape_interval() {
@@ -273,6 +311,57 @@ fn test_new_prometheus_source_negative_scrape_interval() {
 	src := new_prometheus(opts) or { panic(err.str()) }
 	// Negative should default to 15 seconds
 	assert src.scrape_interval == 15_000_000_000
+}
+
+fn test_new_prometheus_source_scrape_timeout() {
+	mut opts := map[string]string{}
+	opts['endpoints'] = 'http://localhost:9090/metrics'
+	opts['scrape_timeout_secs'] = '10'
+	src := new_prometheus(opts) or { panic(err.str()) }
+	assert src.scrape_timeout == 10_000_000_000
+}
+
+fn test_new_prometheus_source_scrape_timeout_default() {
+	mut opts := map[string]string{}
+	opts['endpoints'] = 'http://localhost:9090/metrics'
+	src := new_prometheus(opts) or { panic(err.str()) }
+	// Upstream default: 5 seconds
+	assert src.scrape_timeout == 5_000_000_000
+}
+
+fn test_new_prometheus_source_scrape_timeout_negative() {
+	mut opts := map[string]string{}
+	opts['endpoints'] = 'http://localhost:9090/metrics'
+	opts['scrape_timeout_secs'] = '-1'
+	src := new_prometheus(opts) or { panic(err.str()) }
+	assert src.scrape_timeout == 5_000_000_000
+}
+
+fn test_new_prometheus_source_query_params() {
+	mut opts := map[string]string{}
+	opts['endpoints'] = 'http://localhost:9090/metrics'
+	opts['query.match[]'] = '{job="test"}'
+	src := new_prometheus(opts) or { panic(err.str()) }
+	assert src.query.len == 1
+	assert src.query['match[]'] == '{job="test"}'
+}
+
+fn test_new_prometheus_source_tls_enabled() {
+	mut opts := map[string]string{}
+	opts['endpoints'] = 'http://localhost:9090/metrics'
+	opts['tls.enabled'] = 'true'
+	src := new_prometheus(opts) or { panic(err.str()) }
+	assert src.tls_enabled == true
+	// http:// should be upgraded to https://
+	assert src.endpoints[0] == 'https://localhost:9090/metrics'
+}
+
+fn test_new_prometheus_source_tls_disabled_default() {
+	mut opts := map[string]string{}
+	opts['endpoints'] = 'http://localhost:9090/metrics'
+	src := new_prometheus(opts) or { panic(err.str()) }
+	assert src.tls_enabled == false
+	assert src.endpoints[0] == 'http://localhost:9090/metrics'
 }
 
 fn test_prometheus_source_registry() {
@@ -369,12 +458,12 @@ fn test_make_family_key() {
 	assert !key.contains('le=')
 }
 
-fn test_prom_base64() {
-	assert prom_base64('') == ''
-	assert prom_base64('f') == 'Zg=='
-	assert prom_base64('fo') == 'Zm8='
-	assert prom_base64('foo') == 'Zm9v'
-	assert prom_base64('foobar') == 'Zm9vYmFy'
+fn test_sources_base64() {
+	assert sources_base64('') == ''
+	assert sources_base64('f') == 'Zg=='
+	assert sources_base64('fo') == 'Zm8='
+	assert sources_base64('foo') == 'Zm9v'
+	assert sources_base64('foobar') == 'Zm9vYmFy'
 }
 
 fn test_parse_prometheus_text_empty() {
@@ -513,4 +602,106 @@ fn test_merge_metric_families_no_histogram_summary() {
 	result := merge_metric_families(metrics, types)
 	assert result.len == 1
 	assert result[0].name == 'simple'
+}
+
+// Test honor_labels behavior: when false, existing tags are renamed to exported_
+fn test_apply_tag_honor_labels_false() {
+	mut m := event.Metric{
+		name: 'test_metric'
+		tags: {
+			'instance': 'localhost:9999'
+		}
+	}
+	apply_tag(mut m, 'instance', 'scraper:8080', false)
+	assert m.tags['instance'] == 'scraper:8080'
+	assert m.tags['exported_instance'] == 'localhost:9999'
+}
+
+// Test honor_labels behavior: when true, existing tags are preserved
+fn test_apply_tag_honor_labels_true() {
+	mut m := event.Metric{
+		name: 'test_metric'
+		tags: {
+			'instance': 'localhost:9999'
+		}
+	}
+	apply_tag(mut m, 'instance', 'scraper:8080', true)
+	assert m.tags['instance'] == 'localhost:9999'
+	assert 'exported_instance' !in m.tags
+}
+
+// Test apply_tag when no conflict: tag is always added regardless of honor_labels
+fn test_apply_tag_no_conflict() {
+	mut m := event.Metric{
+		name: 'test_metric'
+	}
+	apply_tag(mut m, 'instance', 'scraper:8080', false)
+	assert m.tags['instance'] == 'scraper:8080'
+	assert 'exported_instance' !in m.tags
+}
+
+fn test_extract_host_port_with_port() {
+	assert extract_host_port('http://localhost:9090/metrics') == 'localhost:9090'
+}
+
+fn test_extract_host_port_no_port_http() {
+	assert extract_host_port('http://example.com/metrics') == 'example.com:80'
+}
+
+fn test_extract_host_port_no_port_https() {
+	assert extract_host_port('https://example.com/metrics') == 'example.com:443'
+}
+
+fn test_extract_host_port_no_path() {
+	assert extract_host_port('http://host:1234') == 'host:1234'
+}
+
+fn test_build_scrape_url_no_query() {
+	assert build_scrape_url('http://localhost:9090/metrics', map[string]string{}) == 'http://localhost:9090/metrics'
+}
+
+fn test_build_scrape_url_with_query() {
+	url := build_scrape_url('http://localhost:9090/metrics', {
+		'foo': 'bar'
+	})
+	assert url.contains('?')
+	assert url.contains('foo=bar')
+}
+
+fn test_build_scrape_url_existing_query() {
+	url := build_scrape_url('http://localhost:9090/metrics?existing=1', {
+		'foo': 'bar'
+	})
+	assert url.contains('&foo=bar')
+}
+
+fn test_parse_auth_header_none() {
+	opts := map[string]string{}
+	assert parse_auth_header(opts) == ''
+}
+
+fn test_parse_auth_header_basic() {
+	opts := {
+		'auth.user':     'admin'
+		'auth.password': 'secret'
+	}
+	h := parse_auth_header(opts)
+	assert h.starts_with('Basic ')
+	assert h == 'Basic ' + sources_base64('admin:secret')
+}
+
+fn test_parse_auth_header_bearer() {
+	opts := {
+		'auth.token': 'my-token'
+	}
+	assert parse_auth_header(opts) == 'Bearer my-token'
+}
+
+fn test_parse_auth_header_bearer_takes_precedence() {
+	opts := {
+		'auth.user':     'admin'
+		'auth.password': 'secret'
+		'auth.token':    'my-token'
+	}
+	assert parse_auth_header(opts) == 'Bearer my-token'
 }

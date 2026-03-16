@@ -88,7 +88,7 @@ fn test_new_nginx_metrics_basic_auth() {
 	opts['auth.password'] = 'secret'
 	src := new_nginx_metrics(opts) or { panic(err.str()) }
 	assert src.auth_header.starts_with('Basic ')
-	assert src.auth_header == 'Basic ' + nginx_base64('admin:secret')
+	assert src.auth_header == 'Basic ' + sources_base64('admin:secret')
 }
 
 fn test_new_nginx_metrics_bearer_auth() {
@@ -156,11 +156,11 @@ Reading: 0 Writing: 0 Waiting: 0
 	assert status.waiting == 0
 }
 
-fn test_nginx_base64() {
-	assert nginx_base64('') == ''
-	assert nginx_base64('f') == 'Zg=='
-	assert nginx_base64('fo') == 'Zm8='
-	assert nginx_base64('foo') == 'Zm9v'
-	assert nginx_base64('foobar') == 'Zm9vYmFy'
-	assert nginx_base64('admin:secret') == 'YWRtaW46c2VjcmV0'
+fn test_nginx_sources_base64() {
+	assert sources_base64('') == ''
+	assert sources_base64('f') == 'Zg=='
+	assert sources_base64('fo') == 'Zm8='
+	assert sources_base64('foo') == 'Zm9v'
+	assert sources_base64('foobar') == 'Zm9vYmFy'
+	assert sources_base64('admin:secret') == 'YWRtaW46c2VjcmV0'
 }
