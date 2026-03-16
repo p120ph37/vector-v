@@ -14,7 +14,7 @@ A V-lang re-implementation of [Vector](https://github.com/vectordotdev/vector) �
 - **VRL**: Full Vector Remap Language interpreter with ~201 stdlib functions implemented
 - **Sources** (46): stdin, demo_logs, fluent, exec, file_descriptors, http_client, socket, websocket, vector, statsd, prometheus, aws_s3, aws_sqs, aws_kinesis_firehose, aws_ecs_metrics, opentelemetry, splunk_hec, redis, datadog_agent, host_metrics, docker_logs, kubernetes_logs, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, apache_metrics, nginx_metrics, mongodb_metrics, eventstoredb_metrics, dnstap, okta, file, syslog, http_server, static_metrics, internal_logs, internal_metrics, prometheus_remote_write, prometheus_pushgateway, heroku_logplex, journald, logstash, postgresql_metrics
 - **Transforms** (16): remap, filter, reduce, aws_ec2_metadata, dedupe, sample, throttle, exclusive_route, passthrough, log_to_metric, metric_to_log, aggregate, tag_cardinality_limit, window, route, trace_to_log, incremental_to_absolute
-- **Sinks** (34): console, blackhole, http, file, aws_s3, websocket, socket, vector, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, statsd, prometheus, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, splunk_hec, datadog, redis, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, azure_blob, azure_monitor_logs, gcp_cloud_storage, gcp_stackdriver, aws_sns, azure_logs_ingestion, gcp_chronicle, gcp_cloud_monitoring
+- **Sinks** (38): console, blackhole, http, file, aws_s3, websocket, socket, vector, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, statsd, prometheus, prometheus_remote_write, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, splunk_hec, datadog, datadog_metrics, datadog_traces, influxdb, redis, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, azure_blob, azure_monitor_logs, gcp_cloud_storage, gcp_stackdriver, aws_sns, azure_logs_ingestion, gcp_chronicle, gcp_cloud_monitoring
 - **API**: REST health/readiness endpoints (`GET /health`, `GET /ready`)
 - **CLI**: `--config`, `--validate`, `--verbose`, `--version`, `--help`
 
@@ -117,10 +117,10 @@ src/
 │   └── registry.v          # Source type registry
 ├── transforms/             # Data processing (16 components)
 │   └── registry.v          # Transform type registry
-├── sinks/                  # Data output (34 components)
+├── sinks/                  # Data output (38 components)
 │   ├── http_client.v       # Shared HTTP batching infrastructure
 │   └── registry.v          # Sink type registry
-├── aws/                    # Shared AWS utilities (credentials, SigV4)
+├── aws/                    # Shared AWS utilities (credentials with ECS support, SigV4)
 ├── topology/pipeline.v     # Pipeline runtime (wiring + event loop)
 ├── api/api.v               # REST API server (health/ready endpoints)
 ├── mockserver/             # Mock HTTP/TCP/UDP servers for testing

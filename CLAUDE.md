@@ -173,7 +173,7 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - `GET /health` — Liveness check
 - `GET /ready` — Readiness check
 
-See [src/vrl/UNIMPLEMENTED.md](src/vrl/UNIMPLEMENTED.md) for VRL function coverage and unimplemented component tracking.
+See [UNIMPLEMENTED.md](UNIMPLEMENTED.md) for VRL function coverage, unimplemented component tracking, and test coverage metrics.
 
 ## Topology & Routing
 
