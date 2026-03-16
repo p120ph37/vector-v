@@ -62,7 +62,7 @@ make coverage-clean                              # Remove .coverage/ artifacts
 
 ## Implemented Components
 
-### Sources (34 / 33 upstream)
+### Sources (34 / 46 upstream)
 - **stdin** — Reads lines from stdin
 - **demo_logs** — Generates sample log events
 - **fluent** — Fluent Forward Protocol v1 over TCP (msgpack)
@@ -98,7 +98,7 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **dnstap** — DNS tap protocol receiver (Frame Streams, protobuf wire format)
 - **okta** — Okta System Log API poller (security/audit events, actor/outcome tracking)
 
-### Transforms (14 / 15 upstream)
+### Transforms (14 / 17 upstream)
 - **remap** — VRL program execution
 - **filter** — Condition-based event filtering
 - **reduce** — Event accumulation with merge strategies
@@ -107,14 +107,14 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **sample** — Statistical event sampling (random or key-based)
 - **throttle** — Rate limiting with token bucket algorithm
 - **exclusive_route** — Route events to first matching output
-- **passthrough** — Identity transform (pass events unchanged)
+- **passthrough** — Identity transform (pass events unchanged; not in upstream, Vector-V addition)
 - **log_to_metric** — Convert log events to metrics (counter, gauge, set, histogram, summary)
 - **metric_to_log** — Convert metric events to structured log events
 - **aggregate** — Aggregate metrics over time intervals (sum counters, latest gauge, union sets)
 - **tag_cardinality_limit** — Limit high-cardinality metric tags (drop_tag or drop_event)
 - **window** — Group log events into time-based windows with optional group_by
 
-### Sinks (29 / 43 upstream)
+### Sinks (30 / 61 upstream)
 - **console** — Write to stdout/stderr (json, text, logfmt)
 - **blackhole** — Discard events (benchmarking)
 - **http** — Generic HTTP sink (json, text, ndjson); shared base layer for protocol-specific HTTP sinks

@@ -12,9 +12,9 @@ A V-lang re-implementation of [Vector](https://github.com/vectordotdev/vector) �
 - **Config system**: TOML configuration parsing with topology validation
 - **Pipeline runtime**: Multi-threaded source → transform → sink pipeline with channel-based communication and input-based routing (fan-in/fan-out)
 - **VRL**: Full Vector Remap Language interpreter with ~201 stdlib functions implemented
-- **Sources** (3): `stdin`, `demo_logs`, `fluent` (Fluentd Forward Protocol v1 over TCP)
-- **Transforms** (9): `remap`, `filter`, `reduce`, `aws_ec2_metadata`, `dedupe`, `sample`, `throttle`, `exclusive_route`, `passthrough`
-- **Sinks** (4): `console` (stdout/stderr, json/text/logfmt), `blackhole`, `loki` (Grafana Loki push API), `opentelemetry` (OTLP HTTP logs)
+- **Sources** (34): stdin, demo_logs, fluent, exec, file_descriptors, http_client, socket, websocket, vector, statsd, prometheus, aws_s3, aws_sqs, aws_kinesis_firehose, aws_ecs_metrics, opentelemetry, splunk_hec, redis, datadog_agent, host_metrics, docker_logs, kubernetes_logs, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, apache_metrics, nginx_metrics, mongodb_metrics, eventstoredb_metrics, dnstap, okta
+- **Transforms** (14): remap, filter, reduce, aws_ec2_metadata, dedupe, sample, throttle, exclusive_route, passthrough, log_to_metric, metric_to_log, aggregate, tag_cardinality_limit, window
+- **Sinks** (30): console, blackhole, http, file, aws_s3, websocket, socket, vector, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, statsd, prometheus, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, splunk_hec, datadog, redis, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, azure_blob, azure_monitor_logs, gcp_cloud_storage, gcp_stackdriver
 - **API**: REST health/readiness endpoints (`GET /health`, `GET /ready`)
 - **CLI**: `--config`, `--validate`, `--verbose`, `--version`, `--help`
 
@@ -95,31 +95,17 @@ src/
 │   ├── runtime.v           # AST interpreter
 │   ├── objectmap.v         # Adaptive flat-array/hashmap
 │   └── stdlib*.v           # ~201 standard library functions
-├── sources/                # Data ingestion (3 components)
-│   ├── stdin.v             # stdin source
-│   ├── demo_logs.v         # Demo log generator
-│   ├── fluent.v            # Fluent Forward Protocol v1 (TCP/msgpack)
+├── sources/                # Data ingestion (34 components)
 │   └── registry.v          # Source type registry
-├── transforms/             # Data processing (9 components)
-│   ├── remap.v             # VRL program execution
-│   ├── filter.v            # Condition-based event filtering
-│   ├── reduce.v            # Event accumulation with merge strategies
-│   ├── aws_ec2_metadata.v  # EC2 metadata enrichment (IMDSv2)
-│   ├── dedupe.v            # Event deduplication (LRU cache)
-│   ├── sample.v            # Statistical sampling
-│   ├── throttle.v          # Rate limiting (token bucket)
-│   ├── exclusive_route.v   # Route to first matching output
-│   ├── passthrough.v       # Identity transform
+├── transforms/             # Data processing (14 components)
 │   └── registry.v          # Transform type registry
-├── sinks/                  # Data output (4 components)
-│   ├── console.v           # stdout/stderr sink (json/text/logfmt)
-│   ├── blackhole.v         # /dev/null sink (benchmarking)
-│   ├── loki.v              # Grafana Loki push API
-│   ├── opentelemetry.v     # OTLP HTTP logs export
+├── sinks/                  # Data output (30 components)
 │   ├── http_client.v       # Shared HTTP batching infrastructure
 │   └── registry.v          # Sink type registry
+├── aws/                    # Shared AWS utilities (credentials, SigV4)
 ├── topology/pipeline.v     # Pipeline runtime (wiring + event loop)
 ├── api/api.v               # REST API server (health/ready endpoints)
+├── mockserver/             # Mock HTTP/TCP/UDP servers for testing
 └── pcre2/                  # PCRE2 C interop for regex support
 ```
 
