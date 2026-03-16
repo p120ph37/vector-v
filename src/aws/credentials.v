@@ -18,6 +18,7 @@ pub enum CredentialSource {
 	config_explicit // explicitly provided in component config
 	environment     // AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
 	profile         // ~/.aws/credentials file
+	ecs             // ECS container credentials (task role)
 	imds            // EC2 instance metadata service
 	none            // no credentials found
 }
@@ -33,7 +34,8 @@ pub:
 //   1. Explicit config (access_key_id + secret_access_key in opts)
 //   2. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN)
 //   3. Shared credentials file (~/.aws/credentials)
-//   4. EC2 instance metadata (IMDSv2)
+//   4. ECS container credentials (AWS_CONTAINER_CREDENTIALS_RELATIVE_URI / _FULL_URI)
+//   5. EC2 instance metadata (IMDSv2)
 //
 // Region is resolved separately: opts["region"] > AWS_REGION > AWS_DEFAULT_REGION > IMDS.
 pub fn resolve_credentials(opts map[string]string) !ResolvedCredentials {
@@ -85,7 +87,21 @@ pub fn resolve_credentials(opts map[string]string) !ResolvedCredentials {
 		}
 	}
 
-	// 4. IMDS (EC2 instance metadata)
+	// 4. ECS container credentials (task IAM role)
+	ecs_creds := load_ecs_credentials() or { AwsCredentials{} }
+	if ecs_creds.access_key_id.len > 0 {
+		return ResolvedCredentials{
+			creds: AwsCredentials{
+				access_key_id: ecs_creds.access_key_id
+				secret_access_key: ecs_creds.secret_access_key
+				session_token: ecs_creds.session_token
+				region: if region.len > 0 { region } else { ecs_creds.region }
+			}
+			source: .ecs
+		}
+	}
+
+	// 5. IMDS (EC2 instance metadata)
 	imds_endpoint := opts['auth.imds_endpoint'] or { 'http://169.254.169.254' }
 	imds_creds := load_imds_credentials(imds_endpoint) or {
 		return ResolvedCredentials{
@@ -221,6 +237,73 @@ pub fn parse_ini_content(content string, section string) ProfileCredentials {
 		secret_access_key: sk
 		session_token: token
 		region: region
+	}
+}
+
+// --- ECS Container Credentials ---
+
+const ecs_metadata_base = 'http://169.254.170.2'
+const ecs_token_header = 'Authorization'
+
+// load_ecs_credentials fetches credentials from the ECS container credential provider.
+// Supports both relative URI (via ECS agent at 169.254.170.2) and full URI (with
+// optional auth token from AWS_CONTAINER_AUTHORIZATION_TOKEN).
+fn load_ecs_credentials() !AwsCredentials {
+	// Check relative URI first (standard ECS task role)
+	relative_uri := os.getenv('AWS_CONTAINER_CREDENTIALS_RELATIVE_URI')
+	if relative_uri.len > 0 {
+		url := '${aws.ecs_metadata_base}${relative_uri}'
+		return fetch_ecs_credentials(url, '')
+	}
+
+	// Check full URI (ECS + custom endpoints, e.g. EKS IRSA)
+	full_uri := os.getenv('AWS_CONTAINER_CREDENTIALS_FULL_URI')
+	if full_uri.len > 0 {
+		auth_token := os.getenv('AWS_CONTAINER_AUTHORIZATION_TOKEN')
+		return fetch_ecs_credentials(full_uri, auth_token)
+	}
+
+	return error('no ECS credential URI set')
+}
+
+// fetch_ecs_credentials makes an HTTP GET to the credential endpoint and parses the response.
+// The response JSON contains AccessKeyId, SecretAccessKey, Token, and optionally Expiration.
+fn fetch_ecs_credentials(url string, auth_token string) !AwsCredentials {
+	mut header_map := map[string]string{}
+	if auth_token.len > 0 {
+		header_map[aws.ecs_token_header] = auth_token
+	}
+
+	mut header := http.new_custom_header_from_map(header_map)!
+
+	mut req := http.prepare(http.FetchConfig{
+		url: url
+		method: .get
+		header: header
+		verbose: false
+	})!
+	req.read_timeout = aws.imds_timeout
+	req.write_timeout = aws.imds_timeout
+
+	resp := req.do() or {
+		return error('ECS credential fetch failed: ${err}')
+	}
+	if resp.status_code != 200 {
+		return error('ECS credential endpoint returned ${resp.status_code}')
+	}
+
+	body := resp.body.trim_space()
+	ak := json_extract(body, 'AccessKeyId')
+	sk := json_extract(body, 'SecretAccessKey')
+	token := json_extract(body, 'Token')
+	if ak.len == 0 || sk.len == 0 {
+		return error('ECS credential response missing keys')
+	}
+
+	return AwsCredentials{
+		access_key_id: ak
+		secret_access_key: sk
+		session_token: token
 	}
 }
 

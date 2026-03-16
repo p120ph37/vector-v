@@ -8,8 +8,8 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
   - `vrl/` — VRL (Vector Remap Language) interpreter and runtime
   - `sources/` — Data ingestion components (stdin, demo_logs, fluent, exec, file_descriptors, http_client, socket, websocket, vector, statsd, prometheus, aws_s3, aws_sqs, aws_kinesis_firehose, aws_ecs_metrics, opentelemetry, splunk_hec, redis, datadog_agent, host_metrics, docker_logs, kubernetes_logs, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, apache_metrics, nginx_metrics, mongodb_metrics, eventstoredb_metrics, dnstap, okta, file, syslog, http_server, static_metrics, internal_logs, internal_metrics, prometheus_remote_write, prometheus_pushgateway, heroku_logplex, journald, logstash, postgresql_metrics)
   - `transforms/` — Data processing (remap, filter, reduce, aws_ec2_metadata, dedupe, sample, throttle, exclusive_route, passthrough, log_to_metric, metric_to_log, aggregate, tag_cardinality_limit, window, route, trace_to_log, incremental_to_absolute)
-  - `sinks/` — Data output destinations (console, blackhole, http, file, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, aws_s3, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, socket, vector, websocket, statsd, prometheus, splunk_hec, datadog, redis, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, azure_blob, azure_monitor_logs, gcp_cloud_storage, gcp_stackdriver, aws_sns, azure_logs_ingestion, gcp_chronicle, gcp_cloud_monitoring)
-  - `aws/` — Shared AWS utilities (credentials resolution, SigV4 signing)
+  - `sinks/` — Data output destinations (console, blackhole, http, file, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, aws_s3, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, socket, vector, websocket, statsd, prometheus, prometheus_remote_write, splunk_hec, datadog, datadog_metrics, datadog_traces, influxdb, redis, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, azure_blob, azure_monitor_logs, gcp_cloud_storage, gcp_stackdriver, aws_sns, azure_logs_ingestion, gcp_chronicle, gcp_cloud_monitoring)
+  - `aws/` — Shared AWS utilities (credentials resolution with ECS task role support, SigV4 signing)
   - `event/` — Event types (log, metric, trace)
   - `topology/` — Component graph management with input-based routing
   - `conf/` — Configuration parsing (TOML, YAML, JSON with auto-detection)
@@ -129,7 +129,7 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **trace_to_log** — Convert trace events to structured log events
 - **incremental_to_absolute** — Convert incremental metrics to absolute with running state
 
-### Sinks (34 / 61 upstream)
+### Sinks (38 / 61 upstream)
 - **console** — Write to stdout/stderr (json, text, logfmt)
 - **blackhole** — Discard events (benchmarking)
 - **http** — Generic HTTP sink (json, text, ndjson); shared base layer for protocol-specific HTTP sinks
@@ -144,11 +144,15 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **aws_cloudwatch_metrics** — AWS CloudWatch Metrics via Embedded Metric Format (EMF over CloudWatch Logs)
 - **statsd** — StatsD line protocol sender (UDP/TCP, DogStatsD tags)
 - **prometheus** — Prometheus Pushgateway text format push (counter, gauge, histogram, summary)
+- **prometheus_remote_write** — Prometheus remote write HTTP endpoint (exposition text, multi-tenant via X-Scope-OrgID)
 - **aws_kinesis_streams** — Kinesis Data Streams via PutRecords API (SigV4-signed, base64-encoded)
 - **aws_kinesis_firehose** — Kinesis Data Firehose via PutRecordBatch API (SigV4-signed, base64-encoded)
 - **aws_sqs** — SQS message sending via SendMessageBatch API (SigV4-signed, FIFO support)
 - **splunk_hec** — Splunk HEC logs sender (token auth, /services/collector/event)
 - **datadog** — Datadog logs API sender (DD-API-KEY auth, /api/v2/logs)
+- **datadog_metrics** — Datadog metrics API sender (DD-API-KEY auth, /api/v2/series)
+- **datadog_traces** — Datadog traces API sender (DD-API-KEY auth, /api/v0.2/traces)
+- **influxdb** — InfluxDB v2 write API (line protocol, Token auth, org/bucket targeting)
 - **redis** — Redis list push and pub/sub publish (RESP protocol)
 - **kafka** — Apache Kafka producer (batched, compression, SASL/TLS auth)
 - **nats** — NATS subject publisher (JetStream support)
@@ -205,7 +209,7 @@ We implement a minimal msgpack decoder directly in V rather than depending on an
 
 `src/aws/` provides shared AWS infrastructure used by CloudWatch sinks and future AWS sinks (S3, Kinesis, etc.):
 
-- **Credential resolution** (`credentials.v`): Standard AWS credential chain — explicit config > environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`) > shared credentials file (`~/.aws/credentials`) > EC2 IMDS. Region resolution follows: config > `AWS_REGION` > `AWS_DEFAULT_REGION` > IMDS.
+- **Credential resolution** (`credentials.v`): Standard AWS credential chain — explicit config > environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`) > shared credentials file (`~/.aws/credentials`) > ECS container credentials (`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` / `AWS_CONTAINER_CREDENTIALS_FULL_URI`) > EC2 IMDS. Region resolution follows: config > `AWS_REGION` > `AWS_DEFAULT_REGION` > IMDS.
 - **SigV4 signing** (`sigv4.v`): AWS Signature Version 4 implementation using V's `crypto.hmac` and `crypto.sha256`. No external SDK dependency.
 
 ### CloudWatch Metrics: EMF via CloudWatch Logs

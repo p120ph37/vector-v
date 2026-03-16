@@ -17,11 +17,15 @@ pub type Sink = ConsoleSink
 	| SocketSink
 	| StatsdSink
 	| PrometheusSink
+	| PrometheusRemoteWriteSink
 	| KinesisSink
 	| KinesisFirehoseSink
 	| SqsSink
 	| SplunkHecSink
 	| DatadogSink
+	| DatadogMetricsSink
+	| DatadogTracesSink
+	| InfluxDbSink
 	| RedisSink
 	| KafkaSink
 	| NatsSink
@@ -80,8 +84,11 @@ pub fn build_sink(typ string, opts map[string]string) !Sink {
 		'statsd' {
 			return Sink(new_statsd_sink(opts)!)
 		}
-		'prometheus', 'prometheus_remote_write' {
+		'prometheus' {
 			return Sink(new_prometheus_sink(opts)!)
+		}
+		'prometheus_remote_write' {
+			return Sink(new_prometheus_remote_write(opts)!)
 		}
 		'aws_kinesis_streams' {
 			return Sink(new_kinesis(opts)!)
@@ -97,6 +104,15 @@ pub fn build_sink(typ string, opts map[string]string) !Sink {
 		}
 		'datadog', 'datadog_logs' {
 			return Sink(new_datadog(opts)!)
+		}
+		'datadog_metrics' {
+			return Sink(new_datadog_metrics(opts)!)
+		}
+		'datadog_traces' {
+			return Sink(new_datadog_traces(opts)!)
+		}
+		'influxdb', 'influxdb_metrics', 'influxdb_logs' {
+			return Sink(new_influxdb(opts)!)
 		}
 		'redis' {
 			return Sink(new_redis(opts)!)
@@ -207,6 +223,10 @@ pub fn send_to_sink(s Sink, e event.Event) ! {
 			mut ps := s
 			ps.send(e)!
 		}
+		PrometheusRemoteWriteSink {
+			mut prw := s
+			prw.send(e)!
+		}
 		KinesisSink {
 			mut ks := s
 			ks.send(e)!
@@ -226,6 +246,18 @@ pub fn send_to_sink(s Sink, e event.Event) ! {
 		DatadogSink {
 			mut dd := s
 			dd.send(e)!
+		}
+		DatadogMetricsSink {
+			mut dm := s
+			dm.send(e)!
+		}
+		DatadogTracesSink {
+			mut dt := s
+			dt.send(e)!
+		}
+		InfluxDbSink {
+			mut inf := s
+			inf.send(e)!
 		}
 		RedisSink {
 			mut rs := s

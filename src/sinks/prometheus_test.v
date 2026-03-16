@@ -323,7 +323,7 @@ fn test_prometheus_remote_write_sink_registry() {
 	mut opts := map[string]string{}
 	opts['endpoint'] = 'http://localhost:9091'
 	s := build_sink('prometheus_remote_write', opts) or { panic(err.str()) }
-	assert s is PrometheusSink
+	assert s is PrometheusRemoteWriteSink
 }
 
 fn test_format_prometheus_gauge_no_tags() {
