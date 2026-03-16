@@ -31,9 +31,10 @@ pub:
 // Route defines a method+path pattern and the responses to cycle through.
 pub struct Route {
 pub:
-	method    string     // HTTP method: GET, POST, PUT, DELETE, etc.
-	path      string     // Exact path to match
-	responses []Response // Cycles through these on successive hits
+	method       string     // HTTP method: GET, POST, PUT, DELETE, etc.
+	path         string     // Exact path to match (or prefix if prefix_match is true)
+	prefix_match bool       // If true, match any path starting with `path`
+	responses    []Response // Cycles through these on successive hits
 }
 
 // CapturedRequest stores the full details of each received HTTP request.
@@ -103,6 +104,26 @@ pub fn route(method string, path string, responses ...Response) Route {
 	return Route{
 		method: method
 		path: path
+		responses: responses
+	}
+}
+
+// post_prefix creates a POST route that matches any path starting with the given prefix.
+pub fn post_prefix(path_prefix string, responses ...Response) Route {
+	return Route{
+		method: 'POST'
+		path: path_prefix
+		prefix_match: true
+		responses: responses
+	}
+}
+
+// put_prefix creates a PUT route that matches any path starting with the given prefix.
+pub fn put_prefix(path_prefix string, responses ...Response) Route {
+	return Route{
+		method: 'PUT'
+		path: path_prefix
+		prefix_match: true
 		responses: responses
 	}
 }
@@ -312,9 +333,11 @@ fn handle_mock_conn(mut conn net.TcpConn, routes []Route, capture chan CapturedR
 	capture.try_push(captured)
 
 	// Find matching route and send response
-	route_key := '${method} ${path}'
 	for r in routes {
-		if r.method == method && r.path == path {
+		path_matches := if r.prefix_match { path.starts_with(r.path) } else { r.path == path }
+		if r.method == method && path_matches {
+			// Use route's path as key (not actual path) so prefix routes track hits correctly
+			route_key := '${method} ${r.path}'
 			if r.responses.len == 0 {
 				send_mock_response(mut conn, 200, '', map[string]string{})
 				route_hits[route_key] = (route_hits[route_key] or { 0 }) + 1

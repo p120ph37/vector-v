@@ -8,7 +8,7 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
   - `vrl/` — VRL (Vector Remap Language) interpreter and runtime
   - `sources/` — Data ingestion components (stdin, demo_logs, fluent, exec, file_descriptors, http_client, socket, websocket, vector, statsd, prometheus, aws_s3, aws_sqs, aws_kinesis_firehose, aws_ecs_metrics, opentelemetry, splunk_hec, redis, datadog_agent, host_metrics, docker_logs, kubernetes_logs, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, apache_metrics, nginx_metrics, mongodb_metrics, eventstoredb_metrics, dnstap, okta)
   - `transforms/` — Data processing (remap, filter, reduce, aws_ec2_metadata, dedupe, sample, throttle, exclusive_route, passthrough, log_to_metric, metric_to_log, aggregate, tag_cardinality_limit, window)
-  - `sinks/` — Data output destinations (console, blackhole, http, file, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, aws_s3, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, socket, vector, websocket, statsd, prometheus, splunk_hec, datadog, redis, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt)
+  - `sinks/` — Data output destinations (console, blackhole, http, file, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, aws_s3, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, socket, vector, websocket, statsd, prometheus, splunk_hec, datadog, redis, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, azure_blob, azure_monitor_logs, gcp_cloud_storage, gcp_stackdriver)
   - `aws/` — Shared AWS utilities (credentials resolution, SigV4 signing)
   - `event/` — Event types (log, metric, trace)
   - `topology/` — Component graph management with input-based routing
@@ -114,7 +114,7 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **tag_cardinality_limit** — Limit high-cardinality metric tags (drop_tag or drop_event)
 - **window** — Group log events into time-based windows with optional group_by
 
-### Sinks (25 / 43 upstream)
+### Sinks (29 / 43 upstream)
 - **console** — Write to stdout/stderr (json, text, logfmt)
 - **blackhole** — Discard events (benchmarking)
 - **http** — Generic HTTP sink (json, text, ndjson); shared base layer for protocol-specific HTTP sinks
@@ -141,6 +141,10 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **pulsar** — Apache Pulsar topic producer (compression, partition keys)
 - **gcp_pubsub** — Google Cloud Pub/Sub topic publisher (REST API, ordering keys)
 - **mqtt** — MQTT topic publisher (QoS 0-2, retain support)
+- **azure_blob** — Azure Blob Storage upload via REST API (Shared Key auth, batched, strftime partitioning)
+- **azure_monitor_logs** — Azure Monitor Logs via Data Collector API (Shared Key auth, Log Analytics workspace)
+- **gcp_cloud_storage** — Google Cloud Storage object upload via JSON API (batched, strftime partitioning)
+- **gcp_stackdriver** — Google Cloud Logging (Stackdriver) via entries.write REST API (batched, resource labels)
 
 ### API
 - `GET /health` — Liveness check

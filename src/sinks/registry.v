@@ -29,6 +29,10 @@ pub type Sink = ConsoleSink
 	| PulsarSink
 	| GcpPubsubSink
 	| MqttSink
+	| AzureBlobSink
+	| AzureMonitorLogsSink
+	| GcpCloudStorageSink
+	| GcpStackdriverSink
 
 // build_sink creates a Sink from a type name and config options.
 pub fn build_sink(typ string, opts map[string]string) !Sink {
@@ -110,6 +114,18 @@ pub fn build_sink(typ string, opts map[string]string) !Sink {
 		}
 		'mqtt' {
 			return Sink(new_mqtt_sink(opts)!)
+		}
+		'azure_blob' {
+			return Sink(new_azure_blob(opts)!)
+		}
+		'azure_monitor_logs' {
+			return Sink(new_azure_monitor_logs(opts)!)
+		}
+		'gcp_cloud_storage' {
+			return Sink(new_gcp_cloud_storage(opts)!)
+		}
+		'gcp_stackdriver', 'gcp_stackdriver_logs', 'gcp_cloud_logging' {
+			return Sink(new_gcp_stackdriver(opts)!)
 		}
 		else {
 			return error('unknown sink type: "${typ}"')
@@ -222,6 +238,22 @@ pub fn send_to_sink(s Sink, e event.Event) ! {
 		MqttSink {
 			mut ms := s
 			ms.send(e)!
+		}
+		AzureBlobSink {
+			mut abs := s
+			abs.send(e)!
+		}
+		AzureMonitorLogsSink {
+			mut amls := s
+			amls.send(e)!
+		}
+		GcpCloudStorageSink {
+			mut gcss := s
+			gcss.send(e)!
+		}
+		GcpStackdriverSink {
+			mut gss := s
+			gss.send(e)!
 		}
 	}
 }
