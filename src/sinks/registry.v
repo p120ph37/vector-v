@@ -20,6 +20,9 @@ pub type Sink = ConsoleSink
 	| KinesisSink
 	| KinesisFirehoseSink
 	| SqsSink
+	| SplunkHecSink
+	| DatadogSink
+	| RedisSink
 
 // build_sink creates a Sink from a type name and config options.
 pub fn build_sink(typ string, opts map[string]string) !Sink {
@@ -74,6 +77,15 @@ pub fn build_sink(typ string, opts map[string]string) !Sink {
 		}
 		'aws_sqs' {
 			return Sink(new_sqs(opts)!)
+		}
+		'splunk_hec', 'splunk_hec_logs' {
+			return Sink(new_splunk_hec(opts)!)
+		}
+		'datadog', 'datadog_logs' {
+			return Sink(new_datadog(opts)!)
+		}
+		'redis' {
+			return Sink(new_redis(opts)!)
 		}
 		else {
 			return error('unknown sink type: "${typ}"')
@@ -150,6 +162,18 @@ pub fn send_to_sink(s Sink, e event.Event) ! {
 		SqsSink {
 			mut sqs := s
 			sqs.send(e)!
+		}
+		SplunkHecSink {
+			mut sh := s
+			sh.send(e)!
+		}
+		DatadogSink {
+			mut dd := s
+			dd.send(e)!
+		}
+		RedisSink {
+			mut rs := s
+			rs.send(e)!
 		}
 	}
 }

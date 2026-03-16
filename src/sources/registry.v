@@ -18,6 +18,10 @@ pub type Source = StdinSource
 	| SqsSource
 	| KinesisFirehoseSource
 	| EcsMetricsSource
+	| OpenTelemetrySource
+	| SplunkHecSource
+	| RedisSource
+	| DatadogAgentSource
 
 // build_source creates a Source from a type name and config options.
 pub fn build_source(typ string, opts map[string]string) !Source {
@@ -66,6 +70,18 @@ pub fn build_source(typ string, opts map[string]string) !Source {
 		}
 		'aws_ecs_metrics' {
 			return Source(new_ecs_metrics(opts))
+		}
+		'opentelemetry' {
+			return Source(new_opentelemetry_source(opts))
+		}
+		'splunk_hec' {
+			return Source(new_splunk_hec_source(opts))
+		}
+		'redis' {
+			return Source(new_redis_source(opts)!)
+		}
+		'datadog_agent' {
+			return Source(new_datadog_agent(opts))
 		}
 		else {
 			return error('unknown source type: "${typ}"')
@@ -119,6 +135,18 @@ pub fn run_source(s Source, output chan event.Event) {
 			s.run(output)
 		}
 		EcsMetricsSource {
+			s.run(output)
+		}
+		OpenTelemetrySource {
+			s.run(output)
+		}
+		SplunkHecSource {
+			s.run(output)
+		}
+		RedisSource {
+			s.run(output)
+		}
+		DatadogAgentSource {
 			s.run(output)
 		}
 	}

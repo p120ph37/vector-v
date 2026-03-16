@@ -48,7 +48,7 @@ fn test_build_and_send_opentelemetry_buffers() {
 }
 
 fn test_build_sink_multiple_unknown_types() {
-	unknown_types := ['redis', 'kafka', 'elasticsearch', 'splunk', '']
+	unknown_types := ['kafka', 'elasticsearch', '']
 	for typ in unknown_types {
 		if _ := build_sink(typ, map[string]string{}) {
 			assert false, 'expected error for unknown sink type: "${typ}"'

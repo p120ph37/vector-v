@@ -6,9 +6,9 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
 
 - `src/` — V source code
   - `vrl/` — VRL (Vector Remap Language) interpreter and runtime
-  - `sources/` — Data ingestion components (stdin, demo_logs, fluent, exec, file_descriptors, http_client, socket, websocket, vector, statsd, prometheus, aws_s3, aws_sqs, aws_kinesis_firehose, aws_ecs_metrics)
+  - `sources/` — Data ingestion components (stdin, demo_logs, fluent, exec, file_descriptors, http_client, socket, websocket, vector, statsd, prometheus, aws_s3, aws_sqs, aws_kinesis_firehose, aws_ecs_metrics, opentelemetry, splunk_hec, redis, datadog_agent)
   - `transforms/` — Data processing (remap, filter, reduce, aws_ec2_metadata, dedupe, sample, throttle, exclusive_route, passthrough, log_to_metric, metric_to_log, aggregate, tag_cardinality_limit, window)
-  - `sinks/` — Data output destinations (console, blackhole, http, file, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, aws_s3, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, socket, vector, websocket, statsd, prometheus)
+  - `sinks/` — Data output destinations (console, blackhole, http, file, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, aws_s3, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, socket, vector, websocket, statsd, prometheus, splunk_hec, datadog, redis)
   - `aws/` — Shared AWS utilities (credentials resolution, SigV4 signing)
   - `event/` — Event types (log, metric, trace)
   - `topology/` — Component graph management with input-based routing
@@ -62,7 +62,7 @@ make coverage-clean                              # Remove .coverage/ artifacts
 
 ## Implemented Components
 
-### Sources (15 / 27 upstream)
+### Sources (19 / 27 upstream)
 - **stdin** — Reads lines from stdin
 - **demo_logs** — Generates sample log events
 - **fluent** — Fluent Forward Protocol v1 over TCP (msgpack)
@@ -78,6 +78,10 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **aws_sqs** — SQS message consumption via ReceiveMessage/DeleteMessage (SigV4-signed)
 - **aws_kinesis_firehose** — HTTP endpoint for Kinesis Data Firehose delivery streams
 - **aws_ecs_metrics** — ECS task metadata endpoint scraper (container CPU, memory, network)
+- **opentelemetry** — OTLP HTTP receiver for logs (JSON ExportLogsServiceRequest)
+- **splunk_hec** — Splunk HTTP Event Collector receiver (token auth, health check)
+- **redis** — Redis pub/sub subscription and list polling (RESP protocol)
+- **datadog_agent** — Datadog Agent HTTP log receiver (/api/v2/logs)
 
 ### Transforms (14 / 15 upstream)
 - **remap** — VRL program execution
@@ -95,7 +99,7 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **tag_cardinality_limit** — Limit high-cardinality metric tags (drop_tag or drop_event)
 - **window** — Group log events into time-based windows with optional group_by
 
-### Sinks (16 / 43 upstream)
+### Sinks (19 / 43 upstream)
 - **console** — Write to stdout/stderr (json, text, logfmt)
 - **blackhole** — Discard events (benchmarking)
 - **http** — Generic HTTP sink (json, text, ndjson); shared base layer for protocol-specific HTTP sinks
@@ -113,6 +117,9 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **aws_kinesis_streams** — Kinesis Data Streams via PutRecords API (SigV4-signed, base64-encoded)
 - **aws_kinesis_firehose** — Kinesis Data Firehose via PutRecordBatch API (SigV4-signed, base64-encoded)
 - **aws_sqs** — SQS message sending via SendMessageBatch API (SigV4-signed, FIFO support)
+- **splunk_hec** — Splunk HEC logs sender (token auth, /services/collector/event)
+- **datadog** — Datadog logs API sender (DD-API-KEY auth, /api/v2/logs)
+- **redis** — Redis list push and pub/sub publish (RESP protocol)
 
 ### API
 - `GET /health` — Liveness check

@@ -8,11 +8,10 @@ All upstream VRL functions are implemented.
 
 ## Unimplemented Vector Components
 
-### Sources (12 not implemented)
+### Sources (8 not implemented)
 | Source | Notes |
 |--------|-------|
 | apache_metrics | Prometheus scrape of Apache mod_status |
-| datadog_agent | Datadog Agent forwarding |
 | dnstap | DNS tap protocol |
 | docker_logs | Docker container log collection |
 | eventstoredb_metrics | EventStoreDB stats |
@@ -23,20 +22,17 @@ All upstream VRL functions are implemented.
 | nats | NATS subscription |
 | nginx_metrics | Nginx stub_status metrics |
 | okta | Okta system log API |
-| opentelemetry | OTLP receiver |
-| redis | Redis pub/sub or list |
-| splunk_hec | Splunk HEC receiver |
 
 ### Transforms (1 not implemented)
 | Transform | Notes |
 |-----------|-------|
 | lua | Lua scripting (V has no Lua FFI) |
 
-### Sinks (27+ not implemented)
+### Sinks (24+ not implemented)
 Major categories not yet implemented:
 - **Azure**: blob, logs_ingestion, monitor_logs
 - **GCP**: Cloud Storage, Chronicle, Pub/Sub, Stackdriver
 - **Databases**: clickhouse, elasticsearch, postgres, influxdb, greptimedb, databend, doris
-- **Messaging**: kafka, nats, mqtt, pulsar, redis, amqp
-- **Observability**: datadog, splunk_hec, new_relic, honeycomb, sematext, axiom, appsignal, humio
+- **Messaging**: kafka, nats, mqtt, pulsar, amqp
+- **Observability**: new_relic, honeycomb, sematext, axiom, appsignal, humio
 - **Other**: webhdfs
