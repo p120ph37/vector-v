@@ -181,6 +181,77 @@ fn test_gcp_pubsub_source_negative_poll_time() {
 	assert s.poll_time_secs == 5
 }
 
+fn test_new_gcp_pubsub_source_empty_project() {
+	new_gcp_pubsub_source({
+		'project':      ''
+		'subscription': 'sub'
+	}) or {
+		assert err.msg().contains('project is required')
+		return
+	}
+	assert false, 'expected error for empty project'
+}
+
+fn test_new_gcp_pubsub_source_empty_subscription() {
+	new_gcp_pubsub_source({
+		'project':      'proj'
+		'subscription': ''
+	}) or {
+		assert err.msg().contains('subscription is required')
+		return
+	}
+	assert false, 'expected error for empty subscription'
+}
+
+fn test_new_gcp_pubsub_source_zero_ack_deadline() {
+	s := new_gcp_pubsub_source({
+		'project':           'proj'
+		'subscription':      'sub'
+		'ack_deadline_secs': '0'
+	}) or { panic(err.str()) }
+	assert s.ack_deadline_secs == 600
+}
+
+fn test_new_gcp_pubsub_source_zero_poll_time() {
+	s := new_gcp_pubsub_source({
+		'project':        'proj'
+		'subscription':   'sub'
+		'poll_time_secs': '0'
+	}) or { panic(err.str()) }
+	assert s.poll_time_secs == 5
+}
+
+fn test_validate_gcp_pubsub_source_config_empty_project() {
+	validate_gcp_pubsub_source_config({
+		'project':      ''
+		'subscription': 'sub'
+	}) or {
+		assert err.msg().contains('project is required')
+		return
+	}
+	assert false, 'expected error for empty project'
+}
+
+fn test_validate_gcp_pubsub_source_config_empty_subscription() {
+	validate_gcp_pubsub_source_config({
+		'project':      'proj'
+		'subscription': ''
+	}) or {
+		assert err.msg().contains('subscription is required')
+		return
+	}
+	assert false, 'expected error for empty subscription'
+}
+
+fn test_new_gcp_pubsub_source_full_response_false() {
+	s := new_gcp_pubsub_source({
+		'project':       'proj'
+		'subscription':  'sub'
+		'full_response': 'false'
+	}) or { panic(err.str()) }
+	assert s.full_response == false
+}
+
 fn test_gcp_pubsub_source_negative_max_concurrency() {
 	s := new_gcp_pubsub_source({
 		'project':         'proj'

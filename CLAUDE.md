@@ -6,7 +6,7 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
 
 - `src/` — V source code
   - `vrl/` — VRL (Vector Remap Language) interpreter and runtime
-  - `sources/` — Data ingestion components (stdin, demo_logs, fluent, exec, file_descriptors, http_client, socket, websocket, vector, statsd, prometheus, aws_s3, aws_sqs, aws_kinesis_firehose, aws_ecs_metrics, opentelemetry, splunk_hec, redis, datadog_agent, host_metrics, docker_logs, kubernetes_logs, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt)
+  - `sources/` — Data ingestion components (stdin, demo_logs, fluent, exec, file_descriptors, http_client, socket, websocket, vector, statsd, prometheus, aws_s3, aws_sqs, aws_kinesis_firehose, aws_ecs_metrics, opentelemetry, splunk_hec, redis, datadog_agent, host_metrics, docker_logs, kubernetes_logs, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt, apache_metrics, nginx_metrics, mongodb_metrics, eventstoredb_metrics, dnstap, okta)
   - `transforms/` — Data processing (remap, filter, reduce, aws_ec2_metadata, dedupe, sample, throttle, exclusive_route, passthrough, log_to_metric, metric_to_log, aggregate, tag_cardinality_limit, window)
   - `sinks/` — Data output destinations (console, blackhole, http, file, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, aws_s3, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, socket, vector, websocket, statsd, prometheus, splunk_hec, datadog, redis, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt)
   - `aws/` — Shared AWS utilities (credentials resolution, SigV4 signing)
@@ -62,7 +62,7 @@ make coverage-clean                              # Remove .coverage/ artifacts
 
 ## Implemented Components
 
-### Sources (28 / 27 upstream)
+### Sources (34 / 33 upstream)
 - **stdin** — Reads lines from stdin
 - **demo_logs** — Generates sample log events
 - **fluent** — Fluent Forward Protocol v1 over TCP (msgpack)
@@ -91,6 +91,12 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **pulsar** — Apache Pulsar topic subscription (OAuth2 auth, dead letter queue)
 - **gcp_pubsub** — Google Cloud Pub/Sub subscription polling (REST API, ack management)
 - **mqtt** — MQTT topic subscription (QoS 0-2, wildcard topics)
+- **apache_metrics** — Apache mod_status metrics scraper (worker stats, scoreboard, request rates)
+- **nginx_metrics** — Nginx stub_status metrics scraper (connections, requests, reading/writing/waiting)
+- **mongodb_metrics** — MongoDB serverStatus metrics (connections, opcounters, memory)
+- **eventstoredb_metrics** — EventStoreDB stats endpoint scraper (process, system, queue metrics)
+- **dnstap** — DNS tap protocol receiver (Frame Streams, protobuf wire format)
+- **okta** — Okta System Log API poller (security/audit events, actor/outcome tracking)
 
 ### Transforms (14 / 15 upstream)
 - **remap** — VRL program execution

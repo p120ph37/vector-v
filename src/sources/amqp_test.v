@@ -152,6 +152,72 @@ fn test_amqp_source_tls_config() {
 	assert s3.tls_enabled == false
 }
 
+fn test_parse_amqp_url_amqps_scheme() {
+	host, port, vhost, user, password := parse_amqp_url('amqps://admin:secret@secure.rabbit.io:5671/production')!
+	assert host == 'secure.rabbit.io'
+	assert port == 5671
+	assert vhost == 'production'
+	assert user == 'admin'
+	assert password == 'secret'
+}
+
+fn test_parse_amqp_url_user_without_password() {
+	// user@ with no colon separator means password is empty
+	host, port, _, user, password := parse_amqp_url('amqp://justuser@myhost:5672/')!
+	assert host == 'myhost'
+	assert port == 5672
+	assert user == 'justuser'
+	assert password == ''
+}
+
+fn test_parse_amqp_url_uppercase_percent_2f() {
+	// %2F (uppercase) should also decode to /
+	_, _, vhost, _, _ := parse_amqp_url('amqp://guest:guest@localhost:5672/%2F')!
+	assert vhost == '/'
+}
+
+fn test_parse_amqp_url_empty_vhost() {
+	// Trailing slash with nothing after it should default to /
+	_, _, vhost, _, _ := parse_amqp_url('amqp://guest:guest@localhost:5672/')!
+	assert vhost == '/'
+}
+
+fn test_parse_amqp_url_no_credentials_no_vhost() {
+	// No @ sign, no vhost
+	host, port, vhost, user, password := parse_amqp_url('amqp://myhost:5672')!
+	assert host == 'myhost'
+	assert port == 5672
+	assert vhost == '/'
+	assert user == 'guest'
+	assert password == 'guest'
+}
+
+fn test_parse_amqp_url_invalid_port() {
+	// Invalid port string falls back to default
+	host, port, _, _, _ := parse_amqp_url('amqp://guest:guest@myhost:abc')!
+	assert host == 'myhost'
+	assert port == 5672
+}
+
+fn test_parse_amqp_url_empty_host_after_at() {
+	// Empty host after credentials => defaults to 127.0.0.1
+	host, port, _, user, _ := parse_amqp_url('amqp://user:pass@:5672/')!
+	assert host == '127.0.0.1'
+	assert port == 5672
+	assert user == 'user'
+}
+
+fn test_new_amqp_source_offset_key() {
+	s := new_amqp_source({
+		'offset_key': 'custom_offset'
+	})
+	assert s.offset_key == 'custom_offset'
+
+	// Default offset_key
+	s2 := new_amqp_source(map[string]string{})
+	assert s2.offset_key == 'amqp_offset'
+}
+
 fn test_amqp_source_exchange_types() {
 	// Each valid exchange type can be configured
 	for et in ['fanout', 'direct', 'topic', 'headers'] {

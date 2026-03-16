@@ -140,6 +140,128 @@ fn test_build_kafka_metadata() {
 	assert event.value_to_string(meta['timestamp_ms'] or { event.Value(0) }) == '1700000000'
 }
 
+fn test_new_kafka_source_empty_bootstrap_servers() {
+	new_kafka_source({
+		'bootstrap_servers': ''
+		'group_id':          'g1'
+		'topics':            't1'
+	}) or {
+		assert err.msg().contains('bootstrap_servers is required')
+		return
+	}
+	assert false, 'expected error for empty bootstrap_servers'
+}
+
+fn test_new_kafka_source_empty_group_id() {
+	new_kafka_source({
+		'bootstrap_servers': 'localhost:9092'
+		'group_id':          ''
+		'topics':            't1'
+	}) or {
+		assert err.msg().contains('group_id is required')
+		return
+	}
+	assert false, 'expected error for empty group_id'
+}
+
+fn test_new_kafka_source_empty_topics() {
+	new_kafka_source({
+		'bootstrap_servers': 'localhost:9092'
+		'group_id':          'g1'
+		'topics':            ''
+	}) or {
+		assert err.msg().contains('topics is required')
+		return
+	}
+	assert false, 'expected error for empty topics'
+}
+
+fn test_new_kafka_source_invalid_auto_offset_reset() {
+	// Invalid value should keep default 'latest'
+	s := new_kafka_source({
+		'bootstrap_servers': 'localhost:9092'
+		'group_id':          'g1'
+		'topics':            't1'
+		'auto_offset_reset': 'invalid'
+	}) or { panic(err.str()) }
+	assert s.auto_offset_reset == 'latest'
+}
+
+fn test_new_kafka_source_negative_commit_interval() {
+	s := new_kafka_source({
+		'bootstrap_servers':  'localhost:9092'
+		'group_id':           'g1'
+		'topics':             't1'
+		'commit_interval_ms': '-100'
+	}) or { panic(err.str()) }
+	assert s.commit_interval_ms == 5000
+}
+
+fn test_new_kafka_source_zero_commit_interval() {
+	s := new_kafka_source({
+		'bootstrap_servers':  'localhost:9092'
+		'group_id':           'g1'
+		'topics':             't1'
+		'commit_interval_ms': '0'
+	}) or { panic(err.str()) }
+	assert s.commit_interval_ms == 5000
+}
+
+fn test_new_kafka_source_negative_session_timeout() {
+	s := new_kafka_source({
+		'bootstrap_servers':  'localhost:9092'
+		'group_id':           'g1'
+		'topics':             't1'
+		'session_timeout_ms': '-50'
+	}) or { panic(err.str()) }
+	assert s.session_timeout_ms == 10000
+}
+
+fn test_new_kafka_source_zero_session_timeout() {
+	s := new_kafka_source({
+		'bootstrap_servers':  'localhost:9092'
+		'group_id':           'g1'
+		'topics':             't1'
+		'session_timeout_ms': '0'
+	}) or { panic(err.str()) }
+	assert s.session_timeout_ms == 10000
+}
+
+fn test_validate_kafka_source_config_missing_group_id() {
+	validate_kafka_source_config({
+		'bootstrap_servers': 'localhost:9092'
+		'topics':            't1'
+	}) or {
+		assert err.msg().contains('group_id is required')
+		return
+	}
+	assert false, 'expected error for missing group_id'
+}
+
+fn test_validate_kafka_source_config_missing_topics() {
+	validate_kafka_source_config({
+		'bootstrap_servers': 'localhost:9092'
+		'group_id':          'g1'
+	}) or {
+		assert err.msg().contains('topics is required')
+		return
+	}
+	assert false, 'expected error for missing topics'
+}
+
+fn test_validate_kafka_source_config_empty_values() {
+	// Empty bootstrap_servers value
+	validate_kafka_source_config({
+		'bootstrap_servers': ''
+		'group_id':          'g1'
+		'topics':            't1'
+	}) or {
+		assert err.msg().contains('bootstrap_servers is required')
+		return
+	}
+	assert false, 'expected error for empty bootstrap_servers'
+}
+
 fn test_kafka_source_sasl_config() {
 	// PLAIN
 	s1 := new_kafka_source({

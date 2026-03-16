@@ -232,6 +232,87 @@ fn test_new_sqs_source_default_endpoint() {
 	assert s.endpoint == 'https://sqs.us-west-2.amazonaws.com'
 }
 
+fn test_new_sqs_source_zero_poll_interval() {
+	set_fake_sqs_env()
+	defer { unset_fake_sqs_env() }
+
+	s := new_sqs({
+		'queue_url':          'https://sqs.us-east-1.amazonaws.com/123/q'
+		'poll_interval_secs': '0'
+	}) or { panic(err.str()) }
+	// Falls back to 1 second default
+	assert s.poll_interval == 1_000_000_000
+}
+
+fn test_new_sqs_source_zero_visibility_timeout() {
+	set_fake_sqs_env()
+	defer { unset_fake_sqs_env() }
+
+	s := new_sqs({
+		'queue_url':          'https://sqs.us-east-1.amazonaws.com/123/q'
+		'visibility_timeout': '0'
+	}) or { panic(err.str()) }
+	assert s.visibility_timeout == 300
+}
+
+fn test_new_sqs_source_zero_max_messages() {
+	set_fake_sqs_env()
+	defer { unset_fake_sqs_env() }
+
+	s := new_sqs({
+		'queue_url':    'https://sqs.us-east-1.amazonaws.com/123/q'
+		'max_messages': '0'
+	}) or { panic(err.str()) }
+	assert s.max_messages == 10
+}
+
+fn test_new_sqs_source_delete_message_true_explicit() {
+	set_fake_sqs_env()
+	defer { unset_fake_sqs_env() }
+
+	s := new_sqs({
+		'queue_url':       'https://sqs.us-east-1.amazonaws.com/123/q'
+		'delete_message': 'true'
+	}) or { panic(err.str()) }
+	assert s.delete_message == true
+}
+
+fn test_new_sqs_source_zero_wait_time() {
+	set_fake_sqs_env()
+	defer { unset_fake_sqs_env() }
+
+	// Zero wait_time_seconds should be valid (short polling)
+	// wait_time_seconds < 0 || > 20 => clamped. 0 is valid.
+	s := new_sqs({
+		'queue_url':         'https://sqs.us-east-1.amazonaws.com/123/q'
+		'wait_time_seconds': '0'
+	}) or { panic(err.str()) }
+	assert s.wait_time_seconds == 0
+}
+
+fn test_new_sqs_source_valid_wait_time_in_range() {
+	set_fake_sqs_env()
+	defer { unset_fake_sqs_env() }
+
+	s := new_sqs({
+		'queue_url':         'https://sqs.us-east-1.amazonaws.com/123/q'
+		'wait_time_seconds': '15'
+	}) or { panic(err.str()) }
+	assert s.wait_time_seconds == 15
+}
+
+fn test_extract_xml_value_missing_close_tag() {
+	// Has open tag but no close tag
+	assert extract_xml_value('<Name>test', 'Name') == ''
+}
+
+fn test_parse_sqs_messages_malformed_no_close_message() {
+	// <Message> without </Message> - should not crash
+	xml := '<ReceiveMessageResponse><Message><MessageId>m1</MessageId><Body>body1</Body>'
+	msgs := parse_sqs_messages(xml)
+	assert msgs.len == 0
+}
+
 fn test_sqs_source_registry() {
 	set_fake_sqs_env()
 	defer { unset_fake_sqs_env() }

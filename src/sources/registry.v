@@ -31,6 +31,12 @@ pub type Source = StdinSource
 	| PulsarSource
 	| GcpPubsubSource
 	| MqttSource
+	| ApacheMetricsSource
+	| NginxMetricsSource
+	| MongodbMetricsSource
+	| EventStoreDbMetricsSource
+	| DnstapSource
+	| OktaSource
 
 // build_source creates a Source from a type name and config options.
 pub fn build_source(typ string, opts map[string]string) !Source {
@@ -118,6 +124,24 @@ pub fn build_source(typ string, opts map[string]string) !Source {
 		}
 		'mqtt' {
 			return Source(new_mqtt_source(opts)!)
+		}
+		'apache_metrics' {
+			return Source(new_apache_metrics(opts)!)
+		}
+		'nginx_metrics' {
+			return Source(new_nginx_metrics(opts)!)
+		}
+		'mongodb_metrics' {
+			return Source(new_mongodb_metrics(opts)!)
+		}
+		'eventstoredb_metrics' {
+			return Source(new_eventstoredb_metrics(opts))
+		}
+		'dnstap' {
+			return Source(new_dnstap(opts)!)
+		}
+		'okta' {
+			return Source(new_okta(opts)!)
 		}
 		else {
 			return error('unknown source type: "${typ}"')
@@ -210,6 +234,24 @@ pub fn run_source(s Source, output chan event.Event) {
 			s.run(output)
 		}
 		MqttSource {
+			s.run(output)
+		}
+		ApacheMetricsSource {
+			s.run(output)
+		}
+		NginxMetricsSource {
+			s.run(output)
+		}
+		MongodbMetricsSource {
+			s.run(output)
+		}
+		EventStoreDbMetricsSource {
+			s.run(output)
+		}
+		DnstapSource {
+			s.run(output)
+		}
+		OktaSource {
 			s.run(output)
 		}
 	}

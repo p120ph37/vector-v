@@ -8,15 +8,9 @@ All upstream VRL functions are implemented.
 
 ## Unimplemented Vector Components
 
-### Sources (5 not implemented)
-| Source | Notes |
-|--------|-------|
-| apache_metrics | Prometheus scrape of Apache mod_status |
-| dnstap | DNS tap protocol |
-| eventstoredb_metrics | EventStoreDB stats |
-| mongodb_metrics | MongoDB server stats |
-| nginx_metrics | Nginx stub_status metrics |
-| okta | Okta system log API |
+### Sources (0 not implemented)
+
+All upstream sources are implemented.
 
 ### Transforms (1 not implemented)
 | Transform | Notes |

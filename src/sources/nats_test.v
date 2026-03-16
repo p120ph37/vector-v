@@ -152,6 +152,91 @@ fn test_nats_source_jetstream_config() {
 	assert s2.jetstream_stream == 'MYSTREAM'
 }
 
+fn test_new_nats_source_empty_subject() {
+	new_nats_source({
+		'subject': ''
+	}) or {
+		assert err.msg().contains('subject is required')
+		return
+	}
+	assert false, 'expected error for empty subject'
+}
+
+fn test_new_nats_source_negative_subscriber_capacity() {
+	s := new_nats_source({
+		'subject':             'test'
+		'subscriber_capacity': '-10'
+	}) or { panic(err.str()) }
+	assert s.subscriber_capacity == 4096
+}
+
+fn test_new_nats_source_zero_subscriber_capacity() {
+	s := new_nats_source({
+		'subject':             'test'
+		'subscriber_capacity': '0'
+	}) or { panic(err.str()) }
+	assert s.subscriber_capacity == 4096
+}
+
+fn test_parse_nats_url_with_trailing_path() {
+	host, port := parse_nats_url('nats://myhost:4222/some/path') or { panic(err.str()) }
+	assert host == 'myhost'
+	assert port == 4222
+}
+
+fn test_parse_nats_url_empty_host_with_port() {
+	// nats://:4222 - empty host before colon => defaults to 127.0.0.1
+	host, port := parse_nats_url('nats://:4222') or { panic(err.str()) }
+	assert host == '127.0.0.1'
+	assert port == 4222
+}
+
+fn test_parse_nats_url_invalid_port() {
+	// Invalid port string falls back to default
+	host, port := parse_nats_url('nats://myhost:abc') or { panic(err.str()) }
+	assert host == 'myhost'
+	assert port == 4222
+}
+
+fn test_validate_nats_source_config_empty_subject() {
+	validate_nats_source_config({
+		'subject': ''
+	}) or {
+		assert err.msg().contains('subject is required')
+		return
+	}
+	assert false, 'expected error for empty subject'
+}
+
+fn test_validate_nats_source_config_invalid_url() {
+	validate_nats_source_config({
+		'subject': 'test'
+		'url':     'http://invalid:4222'
+	}) or {
+		assert err.msg().contains('invalid url')
+		return
+	}
+	assert false, 'expected error for invalid url'
+}
+
+fn test_validate_nats_source_config_with_valid_url() {
+	result := validate_nats_source_config({
+		'subject': 'test'
+		'url':     'nats://myhost:4222'
+	}) or { panic(err.str()) }
+	assert result == true
+}
+
+fn test_new_nats_source_nkey_and_credentials() {
+	s := new_nats_source({
+		'subject':              'test'
+		'auth.nkey':            'SUAM2FG...'
+		'auth.credentials_file': '/path/to/creds'
+	}) or { panic(err.str()) }
+	assert s.auth_nkey == 'SUAM2FG...'
+	assert s.credentials_file == '/path/to/creds'
+}
+
 fn test_nats_source_auth_token() {
 	s := new_nats_source({
 		'subject':    'events'

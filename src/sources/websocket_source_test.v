@@ -72,6 +72,63 @@ fn test_new_websocket_source_invalid_url() {
 	// May parse unexpectedly, just verify no crash
 }
 
+fn test_new_websocket_source_zero_max_length() {
+	s := new_websocket_source({
+		'url':        'ws://localhost:9000/feed'
+		'max_length': '0'
+	})!
+	assert s.max_length == 1048576
+}
+
+fn test_new_websocket_source_negative_reconnect() {
+	s := new_websocket_source({
+		'url':            'ws://localhost:9000/feed'
+		'reconnect_secs': '-3'
+	})!
+	// Falls back to 5 second default
+	assert s.reconnect == 5_000_000_000
+}
+
+fn test_new_websocket_source_zero_reconnect() {
+	s := new_websocket_source({
+		'url':            'ws://localhost:9000/feed'
+		'reconnect_secs': '0'
+	})!
+	assert s.reconnect == 5_000_000_000
+}
+
+fn test_parse_ws_source_uri_empty_host() {
+	parse_ws_source_uri('ws://:9000/feed') or {
+		assert err.msg().contains('empty host')
+		return
+	}
+	assert false, 'expected error for empty host'
+}
+
+fn test_parse_ws_source_uri_invalid_port() {
+	parse_ws_source_uri('ws://localhost:abc/feed') or {
+		assert err.msg().contains('invalid port')
+		return
+	}
+	assert false, 'expected error for invalid port'
+}
+
+fn test_parse_ws_source_uri_zero_port() {
+	parse_ws_source_uri('ws://localhost:0/feed') or {
+		assert err.msg().contains('invalid port')
+		return
+	}
+	assert false, 'expected error for zero port'
+}
+
+fn test_parse_ws_source_uri_no_scheme() {
+	// Without ws:// prefix, treated as host:port
+	u := parse_ws_source_uri('example.com:8080/path')!
+	assert u.host == 'example.com'
+	assert u.port == 8080
+	assert u.path == '/path'
+}
+
 fn test_new_websocket_source_invalid_max_length() {
 	s := new_websocket_source({
 		'url':        'ws://localhost:9000/feed'

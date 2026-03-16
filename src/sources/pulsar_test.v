@@ -130,6 +130,114 @@ fn test_pulsar_source_dead_letter_topic() {
 	assert s.dead_letter_topic == 'persistent://tenant/ns/dlq'
 }
 
+fn test_new_pulsar_source_empty_topics_string() {
+	// Topics present but empty after split/filter
+	new_pulsar_source({
+		'topics': '  ,  , '
+	}) or {
+		assert err.msg().contains('topics is required')
+		return
+	}
+	assert false, 'expected error for empty topics after filtering'
+}
+
+fn test_new_pulsar_source_invalid_endpoint() {
+	new_pulsar_source({
+		'topics':   'my-topic'
+		'endpoint': 'http://invalid:6650'
+	}) or {
+		assert err.msg().contains('endpoint must start with pulsar://')
+		return
+	}
+	assert false, 'expected error for invalid endpoint'
+}
+
+fn test_new_pulsar_source_tls_via_ssl_url() {
+	s := new_pulsar_source({
+		'topics':   'my-topic'
+		'endpoint': 'pulsar+ssl://secure.pulsar.io:6651'
+	}) or { panic(err.str()) }
+	assert s.tls_enabled == true
+	assert s.endpoint == 'pulsar+ssl://secure.pulsar.io:6651'
+}
+
+fn test_new_pulsar_source_tls_explicit() {
+	// tls.enabled=true with regular pulsar:// endpoint
+	s := new_pulsar_source({
+		'topics':      'my-topic'
+		'tls.enabled': 'true'
+	}) or { panic(err.str()) }
+	assert s.tls_enabled == true
+
+	// tls.enabled=false (explicit)
+	s2 := new_pulsar_source({
+		'topics':      'my-topic'
+		'tls.enabled': 'false'
+	}) or { panic(err.str()) }
+	assert s2.tls_enabled == false
+}
+
+fn test_new_pulsar_source_auth_token() {
+	s := new_pulsar_source({
+		'topics':     'my-topic'
+		'auth.token': 'my-secret-token'
+	}) or { panic(err.str()) }
+	assert s.auth_token == 'my-secret-token'
+}
+
+fn test_parse_pulsar_url_empty_after_scheme() {
+	// pulsar:// with nothing after scheme
+	host, port, tls := parse_pulsar_url('pulsar://') or { panic(err.str()) }
+	assert host == '127.0.0.1'
+	assert port == 6650
+	assert tls == false
+}
+
+fn test_parse_pulsar_url_host_only_no_port_with_path() {
+	// pulsar+ssl://host/path (no port, with path)
+	host, port, tls := parse_pulsar_url('pulsar+ssl://myhost/some/path') or { panic(err.str()) }
+	assert host == 'myhost'
+	assert port == 6650
+	assert tls == true
+}
+
+fn test_parse_pulsar_url_invalid_port() {
+	// Invalid port falls back to default
+	host, port, _ := parse_pulsar_url('pulsar://myhost:abc') or { panic(err.str()) }
+	assert host == 'myhost'
+	assert port == 6650
+}
+
+fn test_validate_pulsar_source_config_invalid_endpoint() {
+	validate_pulsar_source_config({
+		'topics':   'my-topic'
+		'endpoint': 'http://bad:6650'
+	}) or {
+		assert err.msg().contains('endpoint must start with pulsar://')
+		return
+	}
+	assert false, 'expected error for invalid endpoint'
+}
+
+fn test_validate_pulsar_source_config_invalid_batch_size() {
+	validate_pulsar_source_config({
+		'topics':     'my-topic'
+		'batch_size': '0'
+	}) or {
+		assert err.msg().contains('batch_size must be positive')
+		return
+	}
+	assert false, 'expected error for invalid batch_size'
+}
+
+fn test_validate_pulsar_source_config_valid_no_endpoint() {
+	// Valid config without explicit endpoint (should not error)
+	result := validate_pulsar_source_config({
+		'topics': 'my-topic'
+	}) or { panic(err.str()) }
+	assert result == true
+}
+
 fn test_pulsar_source_batch_config() {
 	// Custom batch size
 	s1 := new_pulsar_source({
