@@ -22,6 +22,15 @@ pub type Source = StdinSource
 	| SplunkHecSource
 	| RedisSource
 	| DatadogAgentSource
+	| HostMetricsSource
+	| DockerLogsSource
+	| KubernetesLogsSource
+	| KafkaSource
+	| NatsSource
+	| AmqpSource
+	| PulsarSource
+	| GcpPubsubSource
+	| MqttSource
 
 // build_source creates a Source from a type name and config options.
 pub fn build_source(typ string, opts map[string]string) !Source {
@@ -82,6 +91,33 @@ pub fn build_source(typ string, opts map[string]string) !Source {
 		}
 		'datadog_agent' {
 			return Source(new_datadog_agent(opts))
+		}
+		'host_metrics' {
+			return Source(new_host_metrics(opts))
+		}
+		'docker_logs' {
+			return Source(new_docker_logs(opts))
+		}
+		'kubernetes_logs' {
+			return Source(new_kubernetes_logs(opts))
+		}
+		'kafka' {
+			return Source(new_kafka_source(opts)!)
+		}
+		'nats' {
+			return Source(new_nats_source(opts)!)
+		}
+		'amqp' {
+			return Source(new_amqp_source(opts))
+		}
+		'pulsar' {
+			return Source(new_pulsar_source(opts)!)
+		}
+		'gcp_pubsub' {
+			return Source(new_gcp_pubsub_source(opts)!)
+		}
+		'mqtt' {
+			return Source(new_mqtt_source(opts)!)
 		}
 		else {
 			return error('unknown source type: "${typ}"')
@@ -147,6 +183,33 @@ pub fn run_source(s Source, output chan event.Event) {
 			s.run(output)
 		}
 		DatadogAgentSource {
+			s.run(output)
+		}
+		HostMetricsSource {
+			s.run(output)
+		}
+		DockerLogsSource {
+			s.run(output)
+		}
+		KubernetesLogsSource {
+			s.run(output)
+		}
+		KafkaSource {
+			s.run(output)
+		}
+		NatsSource {
+			s.run(output)
+		}
+		AmqpSource {
+			s.run(output)
+		}
+		PulsarSource {
+			s.run(output)
+		}
+		GcpPubsubSource {
+			s.run(output)
+		}
+		MqttSource {
 			s.run(output)
 		}
 	}

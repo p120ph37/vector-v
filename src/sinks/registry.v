@@ -23,6 +23,12 @@ pub type Sink = ConsoleSink
 	| SplunkHecSink
 	| DatadogSink
 	| RedisSink
+	| KafkaSink
+	| NatsSink
+	| AmqpSink
+	| PulsarSink
+	| GcpPubsubSink
+	| MqttSink
 
 // build_sink creates a Sink from a type name and config options.
 pub fn build_sink(typ string, opts map[string]string) !Sink {
@@ -86,6 +92,24 @@ pub fn build_sink(typ string, opts map[string]string) !Sink {
 		}
 		'redis' {
 			return Sink(new_redis(opts)!)
+		}
+		'kafka' {
+			return Sink(new_kafka_sink(opts)!)
+		}
+		'nats' {
+			return Sink(new_nats_sink(opts)!)
+		}
+		'amqp' {
+			return Sink(new_amqp_sink(opts)!)
+		}
+		'pulsar' {
+			return Sink(new_pulsar_sink(opts)!)
+		}
+		'gcp_pubsub' {
+			return Sink(new_gcp_pubsub_sink(opts)!)
+		}
+		'mqtt' {
+			return Sink(new_mqtt_sink(opts)!)
 		}
 		else {
 			return error('unknown sink type: "${typ}"')
@@ -174,6 +198,30 @@ pub fn send_to_sink(s Sink, e event.Event) ! {
 		RedisSink {
 			mut rs := s
 			rs.send(e)!
+		}
+		KafkaSink {
+			mut ks := s
+			ks.send(e)!
+		}
+		NatsSink {
+			mut ns := s
+			ns.send(e)!
+		}
+		AmqpSink {
+			mut as_ := s
+			as_.send(e)!
+		}
+		PulsarSink {
+			mut ps := s
+			ps.send(e)!
+		}
+		GcpPubsubSink {
+			mut gs := s
+			gs.send(e)!
+		}
+		MqttSink {
+			mut ms := s
+			ms.send(e)!
 		}
 	}
 }

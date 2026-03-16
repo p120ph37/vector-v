@@ -6,9 +6,9 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
 
 - `src/` — V source code
   - `vrl/` — VRL (Vector Remap Language) interpreter and runtime
-  - `sources/` — Data ingestion components (stdin, demo_logs, fluent, exec, file_descriptors, http_client, socket, websocket, vector, statsd, prometheus, aws_s3, aws_sqs, aws_kinesis_firehose, aws_ecs_metrics, opentelemetry, splunk_hec, redis, datadog_agent)
+  - `sources/` — Data ingestion components (stdin, demo_logs, fluent, exec, file_descriptors, http_client, socket, websocket, vector, statsd, prometheus, aws_s3, aws_sqs, aws_kinesis_firehose, aws_ecs_metrics, opentelemetry, splunk_hec, redis, datadog_agent, host_metrics, docker_logs, kubernetes_logs, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt)
   - `transforms/` — Data processing (remap, filter, reduce, aws_ec2_metadata, dedupe, sample, throttle, exclusive_route, passthrough, log_to_metric, metric_to_log, aggregate, tag_cardinality_limit, window)
-  - `sinks/` — Data output destinations (console, blackhole, http, file, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, aws_s3, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, socket, vector, websocket, statsd, prometheus, splunk_hec, datadog, redis)
+  - `sinks/` — Data output destinations (console, blackhole, http, file, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics, aws_s3, aws_kinesis_streams, aws_kinesis_firehose, aws_sqs, socket, vector, websocket, statsd, prometheus, splunk_hec, datadog, redis, kafka, nats, amqp, pulsar, gcp_pubsub, mqtt)
   - `aws/` — Shared AWS utilities (credentials resolution, SigV4 signing)
   - `event/` — Event types (log, metric, trace)
   - `topology/` — Component graph management with input-based routing
@@ -62,7 +62,7 @@ make coverage-clean                              # Remove .coverage/ artifacts
 
 ## Implemented Components
 
-### Sources (19 / 27 upstream)
+### Sources (28 / 27 upstream)
 - **stdin** — Reads lines from stdin
 - **demo_logs** — Generates sample log events
 - **fluent** — Fluent Forward Protocol v1 over TCP (msgpack)
@@ -82,6 +82,15 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **splunk_hec** — Splunk HTTP Event Collector receiver (token auth, health check)
 - **redis** — Redis pub/sub subscription and list polling (RESP protocol)
 - **datadog_agent** — Datadog Agent HTTP log receiver (/api/v2/logs)
+- **host_metrics** — System metrics from /proc (CPU, memory, disk, filesystem, load, network, uptime)
+- **docker_logs** — Docker container log collection via Docker Engine API
+- **kubernetes_logs** — Kubernetes pod log collection from node filesystem (CRI log format)
+- **kafka** — Apache Kafka consumer (consumer groups, SASL/TLS auth)
+- **nats** — NATS subject subscription (JetStream, queue groups)
+- **amqp** — AMQP 0-9-1 consumer (RabbitMQ, exchange binding, prefetch)
+- **pulsar** — Apache Pulsar topic subscription (OAuth2 auth, dead letter queue)
+- **gcp_pubsub** — Google Cloud Pub/Sub subscription polling (REST API, ack management)
+- **mqtt** — MQTT topic subscription (QoS 0-2, wildcard topics)
 
 ### Transforms (14 / 15 upstream)
 - **remap** — VRL program execution
@@ -99,7 +108,7 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **tag_cardinality_limit** — Limit high-cardinality metric tags (drop_tag or drop_event)
 - **window** — Group log events into time-based windows with optional group_by
 
-### Sinks (19 / 43 upstream)
+### Sinks (25 / 43 upstream)
 - **console** — Write to stdout/stderr (json, text, logfmt)
 - **blackhole** — Discard events (benchmarking)
 - **http** — Generic HTTP sink (json, text, ndjson); shared base layer for protocol-specific HTTP sinks
@@ -120,6 +129,12 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **splunk_hec** — Splunk HEC logs sender (token auth, /services/collector/event)
 - **datadog** — Datadog logs API sender (DD-API-KEY auth, /api/v2/logs)
 - **redis** — Redis list push and pub/sub publish (RESP protocol)
+- **kafka** — Apache Kafka producer (batched, compression, SASL/TLS auth)
+- **nats** — NATS subject publisher (JetStream support)
+- **amqp** — AMQP 0-9-1 exchange publisher (RabbitMQ, routing keys, persistent delivery)
+- **pulsar** — Apache Pulsar topic producer (compression, partition keys)
+- **gcp_pubsub** — Google Cloud Pub/Sub topic publisher (REST API, ordering keys)
+- **mqtt** — MQTT topic publisher (QoS 0-2, retain support)
 
 ### API
 - `GET /health` — Liveness check

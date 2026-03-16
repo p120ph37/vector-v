@@ -8,18 +8,13 @@ All upstream VRL functions are implemented.
 
 ## Unimplemented Vector Components
 
-### Sources (8 not implemented)
+### Sources (5 not implemented)
 | Source | Notes |
 |--------|-------|
 | apache_metrics | Prometheus scrape of Apache mod_status |
 | dnstap | DNS tap protocol |
-| docker_logs | Docker container log collection |
 | eventstoredb_metrics | EventStoreDB stats |
-| host_metrics | System metrics (CPU, memory, disk) |
-| kubernetes_logs | K8s pod log collection |
 | mongodb_metrics | MongoDB server stats |
-| mqtt | MQTT subscription |
-| nats | NATS subscription |
 | nginx_metrics | Nginx stub_status metrics |
 | okta | Okta system log API |
 
@@ -28,11 +23,10 @@ All upstream VRL functions are implemented.
 |-----------|-------|
 | lua | Lua scripting (V has no Lua FFI) |
 
-### Sinks (24+ not implemented)
+### Sinks (18+ not implemented)
 Major categories not yet implemented:
 - **Azure**: blob, logs_ingestion, monitor_logs
-- **GCP**: Cloud Storage, Chronicle, Pub/Sub, Stackdriver
+- **GCP**: Cloud Storage, Chronicle, Stackdriver
 - **Databases**: clickhouse, elasticsearch, postgres, influxdb, greptimedb, databend, doris
-- **Messaging**: kafka, nats, mqtt, pulsar, amqp
 - **Observability**: new_relic, honeycomb, sematext, axiom, appsignal, humio
 - **Other**: webhdfs
