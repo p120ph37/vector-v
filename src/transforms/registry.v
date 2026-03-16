@@ -11,6 +11,11 @@ pub type Transform = RemapTransform
 	| SampleTransform
 	| ThrottleTransform
 	| ExclusiveRouteTransform
+	| LogToMetricTransform
+	| MetricToLogTransform
+	| AggregateTransform
+	| TagCardinalityLimitTransform
+	| WindowTransform
 
 // build_transform creates a Transform from a type name and config options.
 pub fn build_transform(typ string, opts map[string]string) !Transform {
@@ -38,6 +43,21 @@ pub fn build_transform(typ string, opts map[string]string) !Transform {
 		}
 		'exclusive_route' {
 			return Transform(new_exclusive_route(opts)!)
+		}
+		'log_to_metric' {
+			return Transform(new_log_to_metric(opts)!)
+		}
+		'metric_to_log' {
+			return Transform(new_metric_to_log(opts)!)
+		}
+		'aggregate' {
+			return Transform(new_aggregate(opts)!)
+		}
+		'tag_cardinality_limit' {
+			return Transform(new_tag_cardinality_limit(opts)!)
+		}
+		'window' {
+			return Transform(new_window(opts)!)
 		}
 		else {
 			return error('unknown transform type: "${typ}"')
@@ -70,6 +90,21 @@ pub fn apply_transform(mut t Transform, e event.Event) ![]event.Event {
 			return t.transform(e)
 		}
 		ExclusiveRouteTransform {
+			return t.transform(e)
+		}
+		LogToMetricTransform {
+			return t.transform(e)
+		}
+		MetricToLogTransform {
+			return t.transform(e)
+		}
+		AggregateTransform {
+			return t.transform(e)
+		}
+		TagCardinalityLimitTransform {
+			return t.transform(e)
+		}
+		WindowTransform {
 			return t.transform(e)
 		}
 	}

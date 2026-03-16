@@ -7,7 +7,7 @@ Vector-V is a V-language reimplementation of [Vector](https://vector.dev), a hig
 - `src/` — V source code
   - `vrl/` — VRL (Vector Remap Language) interpreter and runtime
   - `sources/` — Data ingestion components (stdin, demo_logs, fluent)
-  - `transforms/` — Data processing (remap, filter, reduce, aws_ec2_metadata, dedupe, sample, throttle, exclusive_route, passthrough)
+  - `transforms/` — Data processing (remap, filter, reduce, aws_ec2_metadata, dedupe, sample, throttle, exclusive_route, passthrough, log_to_metric, metric_to_log, aggregate, tag_cardinality_limit, window)
   - `sinks/` — Data output destinations (console, blackhole, loki, opentelemetry, aws_cloudwatch_logs, aws_cloudwatch_metrics)
   - `aws/` — Shared AWS utilities (credentials resolution, SigV4 signing)
   - `event/` — Event types (log, metric, trace)
@@ -73,7 +73,7 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **websocket** — Connect to WebSocket servers and receive messages
 - **vector** — Receive events from other Vector instances (JSON-over-TCP)
 
-### Transforms (9 / 15 upstream)
+### Transforms (14 / 15 upstream)
 - **remap** — VRL program execution
 - **filter** — Condition-based event filtering
 - **reduce** — Event accumulation with merge strategies
@@ -83,6 +83,11 @@ make coverage-clean                              # Remove .coverage/ artifacts
 - **throttle** — Rate limiting with token bucket algorithm
 - **exclusive_route** — Route events to first matching output
 - **passthrough** — Identity transform (pass events unchanged)
+- **log_to_metric** — Convert log events to metrics (counter, gauge, set, histogram, summary)
+- **metric_to_log** — Convert metric events to structured log events
+- **aggregate** — Aggregate metrics over time intervals (sum counters, latest gauge, union sets)
+- **tag_cardinality_limit** — Limit high-cardinality metric tags (drop_tag or drop_event)
+- **window** — Group log events into time-based windows with optional group_by
 
 ### Sinks (12 / 43 upstream)
 - **console** — Write to stdout/stderr (json, text, logfmt)
